@@ -192,7 +192,8 @@ object DatasetResource {
       datasetName: String,
       datasetDescription: String,
       isDatasetPublic: Boolean,
-      isDatasetDownloadable: Boolean
+      isDatasetDownloadable: Boolean,
+      assetType: Option[String] = None // "DATASET" (default) or "MODEL"
   )
 
   case class Diff(
@@ -300,6 +301,7 @@ class DatasetResource extends LazyLogging {
       dataset.setIsPublic(isDatasetPublic)
       dataset.setIsDownloadable(isDatasetDownloadable)
       dataset.setOwnerUid(uid)
+      dataset.setType(request.assetType.getOrElse("DATASET"))
 
       // insert record and get created dataset with did
       val createdDataset = ctx
@@ -1065,9 +1067,14 @@ class DatasetResource extends LazyLogging {
   @RolesAllowed(Array("REGULAR", "ADMIN"))
   @Path("/list")
   def listDatasets(
-      @Auth user: SessionUser
+      @Auth user: SessionUser,
+      @QueryParam("type") assetType: String // optional: "DATASET" | "MODEL"; null => all
   ): List[DashboardDataset] = {
     val uid = user.getUid
+    // optional filter on the asset type column
+    val typeCondition =
+      if (assetType != null && assetType.nonEmpty) DATASET.TYPE.eq(assetType)
+      else DSL.noCondition()
     withTransaction(context)(ctx => {
       var accessibleDatasets: ListBuffer[DashboardDataset] = ListBuffer()
       // first fetch all datasets user have explicit access to
@@ -1082,6 +1089,7 @@ class DatasetResource extends LazyLogging {
               .on(USER.UID.eq(DATASET.OWNER_UID))
           )
           .where(DATASET_USER_ACCESS.UID.eq(uid))
+          .and(typeCondition)
           .fetch()
           .map(record => {
             val dataset = record.into(DATASET).into(classOf[Dataset])
@@ -1107,6 +1115,7 @@ class DatasetResource extends LazyLogging {
             .on(USER.UID.eq(DATASET.OWNER_UID))
         )
         .where(DATASET.IS_PUBLIC.eq(true))
+        .and(typeCondition)
         .fetch()
         .asScala
         .flatMap { record =>

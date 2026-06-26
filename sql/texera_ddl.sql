@@ -268,6 +268,7 @@ CREATE TABLE IF NOT EXISTS dataset
     description    TEXT NOT NULL,
     creation_time  TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     cover_image    varchar(255),
+    type           VARCHAR(16) NOT NULL DEFAULT 'DATASET' CHECK (type IN ('DATASET', 'MODEL')),
     FOREIGN KEY (owner_uid) REFERENCES "user"(uid) ON DELETE CASCADE
     );
 

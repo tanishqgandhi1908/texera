@@ -33,6 +33,11 @@
         <sqlFile path="sql/updates/24.sql"/>
     </changeSet>
 
+    <!-- Add type column to dataset (DATASET | MODEL) -->
+    <changeSet id="25" author="tanishqgandhi">
+        <sqlFile path="sql/updates/25.sql"/>
+    </changeSet>
+
     <!-- example changeSet
     <changeSet id="1" author="author">
         <sqlFile path="sql/updates/1.sql"/>
