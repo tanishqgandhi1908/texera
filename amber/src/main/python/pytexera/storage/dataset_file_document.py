@@ -60,6 +60,12 @@ class DatasetFileDocument:
            Example: "/bob@texera.com/twitterDataset/v1/california/irvine/tw1.csv"
         """
         parts = file_path.strip("/").split("/")
+        # Strip a leading resource-type prefix ("datasets"/"models") if present, so
+        # both prefixed (/datasets/..., /models/...) and legacy paths resolve. The
+        # presign request below sends the unprefixed form, which the server resolves
+        # by owner+name regardless of asset type.
+        if parts and parts[0] in ("datasets", "models"):
+            parts = parts[1:]
         if len(parts) < 4:
             raise ValueError(
                 "Invalid file path format. "
