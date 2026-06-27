@@ -91,6 +91,14 @@ class PythonUDFOpDescV2 extends LogicalOp {
   )
   var outputColumns: List[Attribute] = List()
 
+  @JsonProperty
+  @JsonSchemaTitle("Model")
+  @JsonPropertyDescription(
+    "Optional: select an uploaded model (.pt). Texera fetches it automatically and exposes " +
+      "it to your code as `texera_model` (a loaded TorchScript model) — no loading code needed."
+  )
+  var modelPath: String = ""
+
   override def getPhysicalOp(
       workflowId: WorkflowIdentity,
       executionId: ExecutionIdentity
@@ -124,13 +132,29 @@ class PythonUDFOpDescV2 extends LogicalOp {
       Map(operatorInfo.outputPorts.head.id -> outputSchema)
     }
 
+    // If a model is selected in the property panel, fetch + load it in the worker and
+    // expose it to the user's code as `texera_model` — no fetch/load boilerplate needed.
+    val effectiveCode =
+      if (modelPath != null && modelPath.trim.nonEmpty) {
+        val escapedPath = modelPath.trim.replace("\\", "\\\\").replace("\"", "\\\"")
+        s"""# Auto-injected by the Texera model picker: fetches and loads the selected model.
+           |from pytexera.storage import DatasetFileDocument as _texera_dfd
+           |import torch as _texera_torch
+           |texera_model = _texera_torch.jit.load(_texera_dfd("$escapedPath").read_file())
+           |texera_model.eval()
+           |
+           |""".stripMargin + code
+      } else {
+        code
+      }
+
     val physicalOp = if (workers > 1) {
       PhysicalOp
         .oneToOnePhysicalOp(
           workflowId,
           executionId,
           operatorIdentifier,
-          OpExecWithCode(code, "python")
+          OpExecWithCode(effectiveCode, "python")
         )
         .withParallelizable(true)
         .withSuggestedWorkerNum(workers)
@@ -140,7 +164,7 @@ class PythonUDFOpDescV2 extends LogicalOp {
           workflowId,
           executionId,
           operatorIdentifier,
-          OpExecWithCode(code, "python")
+          OpExecWithCode(effectiveCode, "python")
         )
         .withParallelizable(false)
     }
