@@ -51,6 +51,8 @@ import { filter, switchMap } from "rxjs/operators";
 import { BreakpointConditionInputComponent } from "./breakpoint-condition-input/breakpoint-condition-input.component";
 import { CodeDebuggerComponent } from "./code-debugger.component";
 import { GuiConfigService } from "src/app/common/service/gui-config.service";
+import { NzModalService } from "ng-zorro-antd/modal";
+import { DatasetSelectionModalComponent } from "../dataset-selection-modal/dataset-selection-modal.component";
 import { CdkDrag, CdkDragHandle } from "@angular/cdk/drag-drop";
 import { NzSpaceCompactItemDirective } from "ng-zorro-antd/space";
 import { NzButtonComponent } from "ng-zorro-antd/button";
@@ -139,7 +141,8 @@ export class CodeEditorComponent implements AfterViewInit, SafeStyle, OnDestroy 
     private workflowVersionService: WorkflowVersionService,
     public coeditorPresenceService: CoeditorPresenceService,
     private aiAssistantService: AIAssistantService,
-    private config: GuiConfigService
+    private config: GuiConfigService,
+    private modalService: NzModalService
   ) {
     this.currentOperatorId = this.workflowActionService.getJointGraphWrapper().getCurrentHighlightedOperatorIDs()[0];
     const operatorType = this.workflowActionService.getTexeraGraph().getOperator(this.currentOperatorId).operatorType;
@@ -293,6 +296,7 @@ export class CodeEditorComponent implements AfterViewInit, SafeStyle, OnDestroy 
           this.workflowActionService.getTexeraGraph().getSharedModelAwareness()
         );
         this.setupAIAssistantActions(editor);
+        this.setupModelAssistActions(editor);
         this.initCodeDebuggerComponent(editor);
       });
   }
@@ -332,6 +336,94 @@ export class CodeEditorComponent implements AfterViewInit, SafeStyle, OnDestroy 
     };
 
     this.editorWrapper.initAndStart(userConfig, this.editorElement.nativeElement);
+  }
+
+  // Design A prototype: "Load ML Model" assist for Python UDFs. Adds context-menu
+  // actions that pick an uploaded model and insert loader code — either a commented
+  // stub (user writes the rest) or a full working recipe. Inserts via executeEdits
+  // so the change syncs through the Yjs/Monaco binding.
+  private setupModelAssistActions(editor: MonacoEditor): void {
+    if (this.language !== "python") {
+      return;
+    }
+    const insert = (mode: "stub" | "full") => {
+      const modal = this.modalService.create({
+        nzTitle: "Select a model",
+        nzContent: DatasetSelectionModalComponent,
+        nzData: { fileMode: true, selectedPath: null },
+        nzFooter: null,
+        nzWidth: "60%",
+      });
+      modal.afterClose.pipe(untilDestroyed(this)).subscribe((path: string | undefined) => {
+        const model = editor.getModel();
+        if (!path || !model) {
+          return;
+        }
+        if (mode === "full") {
+          editor.executeEdits("model-assist", [
+            { range: model.getFullModelRange(), text: this.fullModelSnippet(path) },
+          ]);
+        } else {
+          const pos = (editor.getSelection() ?? model.getFullModelRange()).getStartPosition();
+          editor.executeEdits("model-assist", [
+            { range: new monaco.Range(pos.lineNumber, 1, pos.lineNumber, 1), text: this.stubModelSnippet(path) },
+          ]);
+        }
+      });
+    };
+    editor.addAction({
+      id: "load-ml-model-full",
+      label: "Load ML Model: insert full template",
+      contextMenuGroupId: "1_modification",
+      contextMenuOrder: 2.0,
+      run: () => insert("full"),
+    });
+    editor.addAction({
+      id: "load-ml-model-stub",
+      label: "Load ML Model: insert loader stub",
+      contextMenuGroupId: "1_modification",
+      contextMenuOrder: 2.1,
+      run: () => insert("stub"),
+    });
+  }
+
+  private stubModelSnippet(path: string): string {
+    return [
+      `# --- Load ML model: ${path} ---`,
+      `# from pytexera.storage import DatasetFileDocument`,
+      `# import torch`,
+      `# buf = DatasetFileDocument("${path}").read_file()`,
+      `# self.model = torch.jit.load(buf); self.model.eval()`,
+      `# TODO: in process_tuple, build the input tensor and run self.model(...)`,
+      "",
+    ].join("\n");
+  }
+
+  private fullModelSnippet(path: string): string {
+    return [
+      `from pytexera import *`,
+      `from pytexera.storage import DatasetFileDocument`,
+      `import torch`,
+      "",
+      `class ProcessTupleOperator(UDFOperatorV2):`,
+      `    @overrides`,
+      `    def open(self):`,
+      `        buf = DatasetFileDocument("${path}").read_file()`,
+      `        self.model = torch.jit.load(buf)`,
+      `        self.model.eval()`,
+      "",
+      `    @overrides`,
+      `    def process_tuple(self, tuple_: Tuple, port: int) -> Iterator[Optional[TupleLike]]:`,
+      `        # TODO: set the feature columns your model expects`,
+      `        feature_cols = ["sepal_length", "sepal_width", "petal_length", "petal_width"]`,
+      `        features = [float(tuple_[c]) for c in feature_cols]`,
+      `        x = torch.tensor([features], dtype=torch.float32)`,
+      `        with torch.no_grad():`,
+      `            out = self.model(x)`,
+      `        tuple_["prediction"] = str(int(out.argmax(1).item()))`,
+      `        yield tuple_`,
+      "",
+    ].join("\n");
   }
 
   private initCodeDebuggerComponent(editor: MonacoEditor) {

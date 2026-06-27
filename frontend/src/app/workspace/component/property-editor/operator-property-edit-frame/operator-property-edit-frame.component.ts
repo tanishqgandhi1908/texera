@@ -545,6 +545,11 @@ export class OperatorPropertyEditFrameComponent implements OnInit, OnChanges, On
         mappedField.type = "datasetversionselector";
       }
 
+      // the Model field on ML operators reuses the dataset file picker to select a model file
+      if (mappedField.key === "modelPath") {
+        mappedField.type = "inputautocomplete";
+      }
+
       if (this.currentOperatorSchema?.operatorType === "FileScanOp" && mappedField.key === "outputFileName") {
         mappedField.expressions = {
           ...mappedField.expressions,
