@@ -79,13 +79,14 @@ class DatasetFileDocument:
 
         self.jwt_token = os.getenv("USER_JWT_TOKEN")
         self.presign_endpoint = os.getenv("FILE_SERVICE_GET_PRESIGNED_URL_ENDPOINT")
-
-        if not self.jwt_token:
-            raise ValueError(
-                "JWT token is required but not set in environment variables."
-            )
         if not self.presign_endpoint:
             self.presign_endpoint = "http://localhost:9092/api/dataset/presign-download"
+        # When no user JWT is available (e.g. a locally-launched computing unit that
+        # the managing service did not inject USER_JWT_TOKEN into), fall back to the
+        # public presign endpoint, which serves public assets without authentication.
+        self.public_presign_endpoint = self.presign_endpoint.replace(
+            "presign-download", "public-presign-download"
+        )
 
     def get_presigned_url(self) -> str:
         """
@@ -94,7 +95,12 @@ class DatasetFileDocument:
         :return: The presigned URL as a string.
         :raises: RuntimeError if the request fails.
         """
-        headers = {"Authorization": f"Bearer {self.jwt_token}"}
+        if self.jwt_token:
+            endpoint = self.presign_endpoint
+            headers = {"Authorization": f"Bearer {self.jwt_token}"}
+        else:
+            endpoint = self.public_presign_endpoint
+            headers = {}
         encoded_file_path = urllib.parse.quote(
             f"/{self.owner_email}"
             f"/{self.dataset_name}"
@@ -107,7 +113,7 @@ class DatasetFileDocument:
         try:
             with self._retry_session() as session:
                 response = session.get(
-                    self.presign_endpoint,
+                    endpoint,
                     headers=headers,
                     params=params,
                     timeout=self._REQUEST_TIMEOUT,

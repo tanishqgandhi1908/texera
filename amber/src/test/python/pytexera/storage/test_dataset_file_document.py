@@ -64,17 +64,29 @@ class TestDatasetFileDocumentInit:
         with pytest.raises(ValueError, match="Invalid file path format"):
             DatasetFileDocument("/bob@x.com/ds/v1")
 
-    def test_requires_jwt_token_in_environment(self, monkeypatch):
+    def test_falls_back_to_public_endpoint_without_jwt(self, monkeypatch):
+        # No JWT (e.g. a locally-launched computing unit): the doc is still usable
+        # and targets the public presign endpoint for public assets.
         monkeypatch.delenv("USER_JWT_TOKEN", raising=False)
         monkeypatch.setenv("FILE_SERVICE_GET_PRESIGNED_URL_ENDPOINT", CUSTOM_ENDPOINT)
-        with pytest.raises(ValueError, match="JWT token is required"):
-            DatasetFileDocument("/bob@x.com/ds/v1/file.csv")
+        doc = DatasetFileDocument("/bob@x.com/ds/v1/file.csv")
+        assert doc.public_presign_endpoint == CUSTOM_ENDPOINT.replace(
+            "presign-download", "public-presign-download"
+        )
 
-    def test_treats_empty_jwt_as_missing(self, monkeypatch):
-        # An empty string is falsy and should be rejected just like an unset var.
+    def test_empty_jwt_uses_public_endpoint_without_auth_header(self, monkeypatch):
+        # An empty string is falsy and is treated as "no JWT" -> public endpoint.
         monkeypatch.setenv("USER_JWT_TOKEN", "")
-        with pytest.raises(ValueError, match="JWT token is required"):
-            DatasetFileDocument("/bob@x.com/ds/v1/file.csv")
+        monkeypatch.setenv("FILE_SERVICE_GET_PRESIGNED_URL_ENDPOINT", CUSTOM_ENDPOINT)
+        doc = DatasetFileDocument("/bob@x.com/ds/v1/file.csv")
+        with patch(
+            "pytexera.storage.dataset_file_document.requests.Session.get"
+        ) as mock_get:
+            mock_get.return_value = make_response(200, body={"presignedUrl": "u"})
+            doc.get_presigned_url()
+            args, kwargs = mock_get.call_args
+            assert args[0] == doc.public_presign_endpoint
+            assert kwargs["headers"] == {}
 
     def test_falls_back_to_default_endpoint_when_env_missing(self, monkeypatch):
         monkeypatch.setenv("USER_JWT_TOKEN", "tok")
