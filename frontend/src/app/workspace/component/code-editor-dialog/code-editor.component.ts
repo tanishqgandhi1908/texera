@@ -395,12 +395,15 @@ export class CodeEditorComponent implements AfterViewInit, SafeStyle, OnDestroy 
       `# buf = DatasetFileDocument("${path}").read_file()`,
       `# self.model = torch.jit.load(buf); self.model.eval()`,
       `# TODO: in process_tuple, build the input tensor and run self.model(...)`,
+      `# TODO: declare any new output column under "Extra output column(s)" in the operator panel`,
       "",
     ].join("\n");
   }
 
   private fullModelSnippet(path: string): string {
     return [
+      `# NOTE: in the operator panel, turn on "Retain input columns" and add the new`,
+      `#       output column under "Extra output column(s)":  prediction : string`,
       `from pytexera import *`,
       `from pytexera.storage import DatasetFileDocument`,
       `import torch`,
