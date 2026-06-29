@@ -49,7 +49,8 @@ object DatasetSearchQueryBuilder extends SearchQueryBuilder with LazyLogging {
     isDatasetPublic = DATASET.IS_PUBLIC,
     isDatasetDownloadable = DATASET.IS_DOWNLOADABLE,
     datasetUserAccess = DATASET_USER_ACCESS.PRIVILEGE,
-    datasetCoverImage = DATASET.COVER_IMAGE
+    datasetCoverImage = DATASET.COVER_IMAGE,
+    datasetType = DATASET.TYPE
   )
 
   /*
@@ -121,6 +122,8 @@ object DatasetSearchQueryBuilder extends SearchQueryBuilder with LazyLogging {
       uid: Integer,
       record: Record
   ): DashboardResource.DashboardClickableFileEntry = {
+    // type is part of the selected schema (datasetType = DATASET.TYPE), so the
+    // translated record carries it and into(classOf[Dataset]) populates it.
     val dataset = record.into(DATASET).into(classOf[Dataset])
     val owner = record.into(USER).into(classOf[User])
     var size = 0L
