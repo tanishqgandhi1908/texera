@@ -39,4 +39,5 @@ export interface Dataset {
   description: string;
   creationTime: number | undefined;
   coverImage: string | undefined;
+  type?: string; // "DATASET" (default) or "MODEL"
 }

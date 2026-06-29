@@ -126,6 +126,21 @@ routes.push({
           component: DatasetDetailComponent,
         },
         {
+          path: "model",
+          component: UserDatasetComponent,
+          data: { assetType: "MODEL" },
+        },
+        {
+          path: "model/:did",
+          component: DatasetDetailComponent,
+          data: { assetType: "MODEL" },
+        },
+        {
+          path: "model/create",
+          component: DatasetDetailComponent,
+          data: { assetType: "MODEL" },
+        },
+        {
           path: "compute",
           component: UserComputingUnitComponent,
         },

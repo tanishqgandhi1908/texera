@@ -57,6 +57,8 @@ export class UserDatasetVersionCreatorComponent implements OnInit {
 
   readonly did: number = inject(NZ_MODAL_DATA)?.did ?? undefined;
 
+  readonly assetType: string = inject(NZ_MODAL_DATA)?.assetType ?? "DATASET";
+
   isCreateButtonDisabled: boolean = false;
 
   public form: FormGroup = new FormGroup({});
@@ -196,7 +198,7 @@ export class UserDatasetVersionCreatorComponent implements OnInit {
         coverImage: undefined,
       };
       this.datasetService
-        .createDataset(ds)
+        .createDataset(ds, this.assetType)
         .pipe(untilDestroyed(this))
         .subscribe({
           next: res => {

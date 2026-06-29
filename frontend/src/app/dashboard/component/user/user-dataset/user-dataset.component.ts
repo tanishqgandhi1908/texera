@@ -20,7 +20,7 @@
 import { UntilDestroy, untilDestroyed } from "@ngneat/until-destroy";
 import { AfterViewInit, Component, ViewChild } from "@angular/core";
 import { UserService } from "../../../../common/service/user/user.service";
-import { Router } from "@angular/router";
+import { ActivatedRoute, Router } from "@angular/router";
 import { SearchService } from "../../../service/user/search.service";
 import { DatasetService } from "../../../service/user/dataset/dataset.service";
 import { SortMethod } from "../../../type/sort-method";
@@ -28,7 +28,7 @@ import { DashboardEntry } from "../../../type/dashboard-entry";
 import { SearchResultsComponent } from "../search-results/search-results.component";
 import { FiltersComponent } from "../filters/filters.component";
 import { firstValueFrom } from "rxjs";
-import { USER_DATASET } from "../../../../app-routing.constant";
+import { USER_DATASET, USER_MODEL } from "../../../../app-routing.constant";
 import { NzModalService } from "ng-zorro-antd/modal";
 import { UserDatasetVersionCreatorComponent } from "./user-dataset-explorer/user-dataset-version-creator/user-dataset-version-creator.component";
 import { DashboardDataset } from "../../../type/dashboard-dataset.interface";
@@ -70,6 +70,19 @@ export class UserDatasetComponent implements AfterViewInit {
   public currentUid = this.userService.getCurrentUser()?.uid;
   public hasMismatch = false; // Display warning when there are mismatched datasets
 
+  // "DATASET" (default) or "MODEL" — set from route data so this same component
+  // backs both the Datasets and Models sections.
+  public assetType: string = "DATASET";
+  public get isModel(): boolean {
+    return this.assetType === "MODEL";
+  }
+  public get assetLabel(): string {
+    return this.isModel ? "Model" : "Dataset";
+  }
+  private get assetBaseRoute(): string {
+    return this.isModel ? USER_MODEL : USER_DATASET;
+  }
+
   private _searchResultsComponent?: SearchResultsComponent;
   @ViewChild(SearchResultsComponent) get searchResultsComponent(): SearchResultsComponent {
     if (this._searchResultsComponent) {
@@ -102,8 +115,10 @@ export class UserDatasetComponent implements AfterViewInit {
     private router: Router,
     private searchService: SearchService,
     private datasetService: DatasetService,
-    private message: NzMessageService
+    private message: NzMessageService,
+    private route: ActivatedRoute
   ) {
+    this.assetType = this.route.snapshot.data["assetType"] ?? "DATASET";
     this.userService
       .userChanged()
       .pipe(untilDestroyed(this))
@@ -173,20 +188,33 @@ export class UserDatasetComponent implements AfterViewInit {
                 );
               }
             }),
-            map(({ entries, more }) => ({ entries, more }))
+            map(({ entries, more }) => ({
+              entries: entries.filter((e: DashboardEntry) => this.matchesAssetType(e)),
+              more,
+            }))
           )
       );
     });
     await this.searchResultsComponent.loadMore();
   }
 
+  private matchesAssetType(entry: DashboardEntry): boolean {
+    // entry.dataset is a getter that throws for non-dataset entries, so guard first.
+    if ((entry.type as string) !== "dataset") {
+      return true;
+    }
+    const t = (entry.dataset.dataset.type ?? "DATASET").toUpperCase();
+    return t === this.assetType;
+  }
+
   public onClickOpenDatasetAddComponent(): void {
     const modal = this.modalService.create({
-      nzTitle: "Create New Dataset",
+      nzTitle: `Create New ${this.assetLabel}`,
       nzContent: UserDatasetVersionCreatorComponent,
       nzFooter: null,
       nzData: {
         isCreatingVersion: false,
+        assetType: this.assetType,
       },
       nzBodyStyle: {
         resize: "both",
@@ -202,7 +230,7 @@ export class UserDatasetComponent implements AfterViewInit {
     modal.afterClose.pipe(untilDestroyed(this)).subscribe(result => {
       if (result != null) {
         const dashboardDataset: DashboardDataset = result as DashboardDataset;
-        this.router.navigate([`${USER_DATASET}/${dashboardDataset.dataset.did}`]);
+        this.router.navigate([`${this.assetBaseRoute}/${dashboardDataset.dataset.did}`]);
       }
     });
   }

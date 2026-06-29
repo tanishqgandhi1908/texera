@@ -86,7 +86,8 @@ describe("UserDatasetComponent", () => {
       routerMock as any,
       searchServiceMock as any,
       datasetServiceMock as any,
-      messageMock as any
+      messageMock as any,
+      { snapshot: { data: {} } } as any
     );
 
     capturedLoadMoreFn = null;

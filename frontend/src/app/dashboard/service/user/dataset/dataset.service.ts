@@ -66,12 +66,13 @@ export class DatasetService {
     private config: GuiConfigService
   ) {}
 
-  public createDataset(dataset: Dataset): Observable<DashboardDataset> {
+  public createDataset(dataset: Dataset, assetType: string = "DATASET"): Observable<DashboardDataset> {
     return this.http.post<DashboardDataset>(`${AppSettings.getApiEndpoint()}/${DATASET_CREATE_URL}`, {
       datasetName: dataset.name,
       datasetDescription: dataset.description,
       isDatasetPublic: dataset.isPublic,
       isDatasetDownloadable: dataset.isDownloadable,
+      assetType: assetType,
     });
   }
 
@@ -118,8 +119,12 @@ export class DatasetService {
     });
   }
 
-  public retrieveAccessibleDatasets(): Observable<DashboardDataset[]> {
-    return this.http.get<DashboardDataset[]>(`${AppSettings.getApiEndpoint()}/${DATASET_LIST_URL}`);
+  public retrieveAccessibleDatasets(assetType?: string): Observable<DashboardDataset[]> {
+    let params = new HttpParams();
+    if (assetType) {
+      params = params.set("type", assetType);
+    }
+    return this.http.get<DashboardDataset[]>(`${AppSettings.getApiEndpoint()}/${DATASET_LIST_URL}`, { params });
   }
 
   public createDatasetVersion(did: number, newVersion: string): Observable<DatasetVersion> {
