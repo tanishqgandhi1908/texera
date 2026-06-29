@@ -86,8 +86,11 @@ class FileResolverSpec
   // Legacy (pre-prefix) format, kept resolvable for backward compatibility.
   private val legacyDataset1TxtFilePath = "/test_user@test.com/test_dataset/v1/1.txt"
 
-  // "models" is not (yet) a registered resource-type prefix, so it must NOT be stripped.
-  private val unknownPrefixFilePath = "/models/test_user@test.com/test_dataset/v1/1.txt"
+  // "models" is a registered resource-type prefix and is stripped like "datasets".
+  private val modelsPrefixFilePath = "/models/test_user@test.com/test_dataset/v1/1.txt"
+
+  // A genuinely unregistered prefix is NOT stripped (treated as the owner segment).
+  private val unknownPrefixFilePath = "/notaprefix/test_user@test.com/test_dataset/v1/1.txt"
 
   override protected def beforeAll(): Unit = {
     initializeDBAndReplaceDSLContext()
@@ -134,8 +137,15 @@ class FileResolverSpec
     )
   }
 
+  "FileResolver" should "strip the models prefix and resolve like a dataset path" in {
+    val modelsUri = FileResolver.resolve(modelsPrefixFilePath)
+    assert(
+      modelsUri.toString == f"${FileResolver.DATASET_FILE_URI_SCHEME}:///${testDataset.getRepositoryName}/${testDatasetVersion1.getVersionHash}/1.txt"
+    )
+  }
+
   "FileResolver" should "not strip an unregistered resource-type prefix" in {
-    // "models" is treated as the ownerEmail segment, so the dataset lookup fails and
+    // "notaprefix" is treated as the ownerEmail segment, so the dataset lookup fails and
     // resolution falls back to a (missing) local file.
     assertThrows[FileNotFoundException] {
       FileResolver.resolve(unknownPrefixFilePath)

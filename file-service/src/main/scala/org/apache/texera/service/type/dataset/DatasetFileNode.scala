@@ -78,12 +78,13 @@ object DatasetFileNode {
     * @return A list of root-level dataset file nodes.
     */
   def fromLakeFSRepositoryCommittedObjects(
-      map: Map[(String, String, String), List[ObjectStats]]
+      map: Map[(String, String, String), List[ObjectStats]],
+      resourceType: String = "datasets"
   ): List[DatasetFileNode] = {
     val rootNode = new DatasetFileNode("/", "directory", null, "")
 
-    // Add "datasets" prefix node
-    val datasetsNode = new DatasetFileNode("datasets", "directory", rootNode, "")
+    // Add the resource-type prefix node ("datasets" or "models")
+    val datasetsNode = new DatasetFileNode(resourceType, "directory", rootNode, "")
     rootNode.children = Some(List(datasetsNode))
 
     // Owner level nodes map

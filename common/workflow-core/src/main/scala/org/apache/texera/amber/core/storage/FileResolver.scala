@@ -75,7 +75,7 @@ object FileResolver {
     filePath.toUri
   }
 
-  private val RESOURCE_TYPE_PREFIXES = Set("datasets")
+  private val RESOURCE_TYPE_PREFIXES = Set("datasets", "models")
 
   /**
     * Parses a dataset file path and extracts its components.

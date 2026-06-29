@@ -437,7 +437,8 @@ class DatasetResource extends LazyLogging {
         insertedVersion,
         DatasetFileNode
           .fromLakeFSRepositoryCommittedObjects(
-            Map((user.getEmail, datasetName, newVersionName) -> fileNodes)
+            Map((user.getEmail, datasetName, newVersionName) -> fileNodes),
+            if (dataset.getType == "MODEL") "models" else "datasets"
           )
       )
     }
@@ -1068,7 +1069,7 @@ class DatasetResource extends LazyLogging {
   @Path("/list")
   def listDatasets(
       @Auth user: SessionUser,
-      @QueryParam("type") assetType: String // optional: "DATASET" | "MODEL"; null => all
+      @QueryParam("type") assetType: String = null // optional: "DATASET" | "MODEL"; null => all
   ): List[DashboardDataset] = {
     val uid = user.getUid
     // optional filter on the asset type column
@@ -1206,7 +1207,8 @@ class DatasetResource extends LazyLogging {
               latestVersion.getName
             ) -> LakeFSStorageClient
               .retrieveObjectsOfVersion(dataset.getRepositoryName, latestVersion.getVersionHash)
-          )
+          ),
+          if (dataset.getType == "MODEL") "models" else "datasets"
         )
         .head
 
@@ -1428,7 +1430,8 @@ class DatasetResource extends LazyLogging {
         Map(
           (dataset.ownerEmail, datasetName, datasetVersion.getName) -> LakeFSStorageClient
             .retrieveObjectsOfVersion(repositoryName, datasetVersion.getVersionHash)
-        )
+        ),
+        if (dataset.dataset.getType == "MODEL") "models" else "datasets"
       )
       .head
 
