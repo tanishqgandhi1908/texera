@@ -550,6 +550,11 @@ export class OperatorPropertyEditFrameComponent implements OnInit, OnChanges, On
         mappedField.type = "inputautocomplete";
       }
 
+      // the Model folder field selects a whole model version (folder) to materialize on the worker
+      if (mappedField.key === "modelFolderPath") {
+        mappedField.type = "inputautocomplete";
+      }
+
       if (this.currentOperatorSchema?.operatorType === "FileScanOp" && mappedField.key === "outputFileName") {
         mappedField.expressions = {
           ...mappedField.expressions,

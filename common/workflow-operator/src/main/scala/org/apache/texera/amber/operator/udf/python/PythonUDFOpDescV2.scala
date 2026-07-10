@@ -94,10 +94,20 @@ class PythonUDFOpDescV2 extends LogicalOp {
   @JsonProperty
   @JsonSchemaTitle("Model")
   @JsonPropertyDescription(
-    "Optional: select an uploaded model (.pt). Texera fetches it automatically and exposes " +
-      "it to your code as `texera_model` (a loaded TorchScript model) — no loading code needed."
+      "Optional: select an uploaded single-file model (.pt). Texera fetches it automatically and " +
+      "exposes it to your code as `texera_model` (a loaded TorchScript model) — no loading code needed."
   )
   var modelPath: String = ""
+
+  @JsonProperty
+  @JsonSchemaTitle("Model folder")
+  @JsonPropertyDescription(
+    "Optional: for a multi-file / sharded model (e.g. an LLM), select ANY file inside the model " +
+      "version. Texera downloads the WHOLE version to a local directory and exposes its path as " +
+      "`texera_model_dir` — load it with your framework, e.g. " +
+      "torch.jit.load(f'{texera_model_dir}/model.pt') or from_pretrained(texera_model_dir)."
+  )
+  var modelFolderPath: String = ""
 
   override def getPhysicalOp(
       workflowId: WorkflowIdentity,
@@ -133,20 +143,33 @@ class PythonUDFOpDescV2 extends LogicalOp {
     }
 
     // If a model is selected in the property panel, fetch + load it in the worker and
-    // expose it to the user's code as `texera_model` — no fetch/load boilerplate needed.
-    val effectiveCode =
-      if (modelPath != null && modelPath.trim.nonEmpty) {
-        val escapedPath = modelPath.trim.replace("\\", "\\\\").replace("\"", "\\\"")
+    // expose it to the user's code — no fetch/load boilerplate needed. A single-file model
+    // (`modelPath`) is streamed into memory and loaded as `texera_model`; a model folder
+    // (`modelFolderPath`) is materialized to a local directory exposed as `texera_model_dir`.
+    def escapePy(s: String): String = s.trim.replace("\\", "\\\\").replace("\"", "\\\"")
+    val modelPreamble = new StringBuilder
+    if (modelFolderPath != null && modelFolderPath.trim.nonEmpty) {
+      modelPreamble.append(
+        s"""# Auto-injected by the Texera model-folder picker: downloads the whole model version
+           |# to a local directory and exposes its path as `texera_model_dir`.
+           |from pytexera.storage import ModelFolderDocument as _texera_mfd
+           |texera_model_dir = _texera_mfd("${escapePy(modelFolderPath)}").download()
+           |
+           |""".stripMargin
+      )
+    }
+    if (modelPath != null && modelPath.trim.nonEmpty) {
+      modelPreamble.append(
         s"""# Auto-injected by the Texera model picker: fetches and loads the selected model.
            |from pytexera.storage import DatasetFileDocument as _texera_dfd
            |import torch as _texera_torch
-           |texera_model = _texera_torch.jit.load(_texera_dfd("$escapedPath").read_file())
+           |texera_model = _texera_torch.jit.load(_texera_dfd("${escapePy(modelPath)}").read_file())
            |texera_model.eval()
            |
-           |""".stripMargin + code
-      } else {
-        code
-      }
+           |""".stripMargin
+      )
+    }
+    val effectiveCode = modelPreamble.toString + code
 
     val physicalOp = if (workers > 1) {
       PhysicalOp

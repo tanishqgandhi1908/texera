@@ -16,5 +16,6 @@
 # under the License.
 
 from .dataset_file_document import DatasetFileDocument
+from .model_folder_document import ModelFolderDocument
 
-__all__ = ["DatasetFileDocument"]
+__all__ = ["DatasetFileDocument", "ModelFolderDocument"]

@@ -690,6 +690,28 @@ class DatasetResource extends LazyLogging {
     generatePresignedResponse(encodedUrl, repositoryName, commitHash, null)
   }
 
+  // Lists every file under a dataset/model *version* (or a subfolder of it), returning
+  // paths relative to the version root. Used by pytexera's ModelFolderDocument to
+  // materialize a whole model folder (multi-file / sharded models) onto the worker.
+  @GET
+  @RolesAllowed(Array("REGULAR", "ADMIN"))
+  @Path("/list-files")
+  def listVersionFiles(
+      @QueryParam("filePath") encodedUrl: String,
+      @Auth user: SessionUser
+  ): Response = {
+    generateListFilesResponse(encodedUrl, user.getUid)
+  }
+
+  @GET
+  @PermitAll
+  @Path("/public-list-files")
+  def listPublicVersionFiles(
+      @QueryParam("filePath") encodedUrl: String
+  ): Response = {
+    generateListFilesResponse(encodedUrl, null)
+  }
+
   @DELETE
   @RolesAllowed(Array("REGULAR", "ADMIN"))
   @Path("/{did}/file")
@@ -1477,6 +1499,54 @@ class DatasetResource extends LazyLogging {
         }
 
         Response.ok(Map("presignedUrl" -> url)).build()
+    }
+  }
+
+  // Resolves a folder logical path "/[models|datasets]/owner/name/version[/subfolder]"
+  // to its LakeFS repo + commit, lists all objects in that version, and returns the
+  // ones at/under the requested subfolder (paths relative to the version root).
+  private def generateListFilesResponse(encodedUrl: String, uid: Integer): Response = {
+    val decodedPath = URLDecoder.decode(encodedUrl, StandardCharsets.UTF_8.name())
+    val rawParts = decodedPath.stripPrefix("/").split("/").toList
+    val parts =
+      if (rawParts.headOption.exists(p => p == "datasets" || p == "models")) rawParts.drop(1)
+      else rawParts
+    if (parts.length < 3) {
+      return Response
+        .status(Response.Status.BAD_REQUEST)
+        .entity("Expected path: /ownerEmail/datasetName/versionName[/subfolder]")
+        .build()
+    }
+    val ownerEmail = parts.head
+    val datasetName = parts(1)
+    val versionName = parts(2)
+    val subfolder = parts.drop(3).mkString("/")
+
+    withTransaction(context) { ctx =>
+      val dataset = getDatasetBy(ownerEmail, datasetName)
+      if (!userHasReadAccess(ctx, dataset.getDid, uid)) {
+        throw new ForbiddenException(ERR_USER_HAS_NO_ACCESS_TO_DATASET_MESSAGE)
+      }
+      val versionHash = ctx
+        .select(DATASET_VERSION.VERSION_HASH)
+        .from(DATASET_VERSION)
+        .where(DATASET_VERSION.DID.eq(dataset.getDid))
+        .and(DATASET_VERSION.NAME.eq(versionName))
+        .fetchOne(DATASET_VERSION.VERSION_HASH)
+      if (versionHash == null) {
+        throw new NotFoundException(ERR_DATASET_VERSION_NOT_FOUND_MESSAGE)
+      }
+
+      val objects = withLakeFSErrorHandling(
+        s"listing files of version '$versionName' of dataset '$datasetName'"
+      ) {
+        LakeFSStorageClient.retrieveObjectsOfVersion(dataset.getRepositoryName, versionHash)
+      }
+      val prefix = if (subfolder.isEmpty) "" else subfolder + "/"
+      val files = objects
+        .map(_.getPath)
+        .filter(p => prefix.isEmpty || p == subfolder || p.startsWith(prefix))
+      Response.ok(Map("files" -> files)).build()
     }
   }
 

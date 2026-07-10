@@ -21,6 +21,7 @@ from typing import Iterator, Optional, Union
 
 from pyamber import *
 from .storage.dataset_file_document import DatasetFileDocument
+from .storage.model_folder_document import ModelFolderDocument
 from .storage.large_binary_input_stream import LargeBinaryInputStream
 from .storage.large_binary_output_stream import LargeBinaryOutputStream
 from .udf.udf_operator import (
@@ -44,6 +45,7 @@ __all__ = [
     "UDFBatchOperator",
     "UDFSourceOperator",
     "DatasetFileDocument",
+    "ModelFolderDocument",
     "largebinary",
     "LargeBinaryInputStream",
     "LargeBinaryOutputStream",
