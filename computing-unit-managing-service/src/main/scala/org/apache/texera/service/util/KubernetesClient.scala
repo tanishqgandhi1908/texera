@@ -22,7 +22,7 @@ package org.apache.texera.service.util
 import io.fabric8.kubernetes.api.model._
 import io.fabric8.kubernetes.api.model.metrics.v1beta1.PodMetricsList
 import io.fabric8.kubernetes.client.KubernetesClientBuilder
-import org.apache.texera.common.config.KubernetesConfig
+import org.apache.texera.common.config.{EnvironmentalVariable, KubernetesConfig}
 
 import scala.jdk.CollectionConverters._
 
@@ -92,7 +92,30 @@ object KubernetesClient {
       throw new Exception(s"Pod with cuid $cuid already exists")
     }
 
-    val envList = envVars
+    // ── Model mount (Option B) — how model folders reach the worker ─────────────
+    // LOCAL dev: an operator provisions the FUSE mount out-of-band (e.g. `rclone
+    //   mount` against the lakeFS S3 gateway) and exports TEXERA_MODEL_MOUNT_ROOT;
+    //   there is no pod to patch, so this block is simply disabled.
+    // PRODUCTION (here): the manager mounts a CSI-backed, READ-ONLY PersistentVolume
+    //   (provisioned by mountpoint-s3 / csi-s3 over the lakeFS S3 gateway) into the
+    //   computing-unit pod and sets TEXERA_MODEL_MOUNT_ROOT. The worker's
+    //   ModelFolderDocument.download() then returns <root>/<owner>/<name>/<version>
+    //   and the CSI layer fetches files lazily on read — no per-pod whole-folder
+    //   download. Toggle with KUBERNETES_MODEL_MOUNT_ENABLED=true.
+    val modelMountEnabled =
+      EnvironmentalVariable.get("KUBERNETES_MODEL_MOUNT_ENABLED").contains("true")
+    val modelMountPath =
+      EnvironmentalVariable.get("KUBERNETES_MODEL_MOUNT_PATH").getOrElse("/models")
+    val modelMountPvc =
+      EnvironmentalVariable.get("KUBERNETES_MODEL_MOUNT_PVC").getOrElse("texera-model-store")
+    val modelMountVolumeName = "texera-model-store"
+
+    val effectiveEnvVars =
+      if (modelMountEnabled)
+        envVars + (EnvironmentalVariable.ENV_TEXERA_MODEL_MOUNT_ROOT -> modelMountPath)
+      else envVars
+
+    val envList = effectiveEnvVars
       .map {
         case (key, value) =>
           new EnvVarBuilder()
@@ -153,6 +176,16 @@ object KubernetesClient {
         .endVolumeMount()
     }
 
+    // Read-only mount of the model store into the worker container (Option B, prod)
+    if (modelMountEnabled) {
+      containerBuilder
+        .addNewVolumeMount()
+        .withName(modelMountVolumeName)
+        .withMountPath(modelMountPath)
+        .withReadOnly(true)
+        .endVolumeMount()
+    }
+
     containerBuilder.endContainer()
 
     // Add tmpfs volume if needed
@@ -166,6 +199,19 @@ object KubernetesClient {
             .withSizeLimit(new Quantity(size))
             .build()
         )
+        .endVolume()
+    }
+
+    // Model-store volume: a CSI/PVC exposing lakeFS model versions, mounted read-only
+    // (Option B, production). The PVC is provisioned at deploy time by the S3 CSI driver.
+    if (modelMountEnabled) {
+      specBuilder
+        .addNewVolume()
+        .withName(modelMountVolumeName)
+        .withNewPersistentVolumeClaim()
+        .withClaimName(modelMountPvc)
+        .withReadOnly(true)
+        .endPersistentVolumeClaim()
         .endVolume()
     }
 

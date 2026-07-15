@@ -40,6 +40,12 @@ object EnvironmentalVariable {
     "FILE_SERVICE_UPLOAD_ONE_FILE_TO_DATASET_ENDPOINT"
 
   /**
+    * Model-mount related vars (Option B: lazy FUSE/CSI mount of model versions).
+    * When set, ModelFolderDocument returns the mounted folder instead of downloading.
+    */
+  val ENV_TEXERA_MODEL_MOUNT_ROOT = "TEXERA_MODEL_MOUNT_ROOT"
+
+  /**
     * Auth related vars
     */
   val ENV_USER_JWT_TOKEN = "USER_JWT_TOKEN"
