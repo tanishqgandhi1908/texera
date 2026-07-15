@@ -1,0 +1,56 @@
+# Option B prototype — lazy mount instead of download (branch `proto/ml-model-mount`)
+
+This branch prototypes **Option B** from [ML_MODELS_SCALABLE_LOADING.md](ML_MODELS_SCALABLE_LOADING.md):
+instead of downloading a whole model version to the pod's local disk (Option A, on
+`proto/ml-model-ux`), the model version is exposed as a **read-only FUSE mount** and files are fetched
+**lazily on read**. Same UDF code, same picker — only where the bytes come from changes.
+
+## The only code change
+`amber/src/main/python/pytexera/storage/model_folder_document.py` — `download()` now checks
+`TEXERA_MODEL_MOUNT_ROOT`. If set and `<root>/<owner>/<name>/<version>/` is a populated mount, it
+returns that path directly (no download); otherwise it falls back to the normal download (Option A).
+No Scala / operator change — the injected `ModelFolderDocument(...).download()` is unchanged, so the
+two approaches are directly comparable.
+
+## How the mount is provisioned (the CSI-driver equivalent, done by ops, not the UDF)
+lakeFS OSS ships an **S3 Gateway** (S3-compatible, path style `s3://<repo>/<ref>/<path>`). We mount a
+specific **immutable version** (`repo = dataset-{did}`, `ref = version_hash`) with a generic S3 FUSE
+tool. In production this is the `mountpoint-s3` CSI driver; locally the prototype uses `rclone mount`:
+
+```
+# rclone remote (points at the lakeFS S3 gateway, path-style)
+[lakefs]
+type = s3
+provider = Other
+access_key_id = <lakefs key>
+secret_access_key = <lakefs secret>
+endpoint = http://localhost:8000
+force_path_style = true
+
+# mount ONE model version, read-only, lazy VFS cache, at the logical path:
+rclone mount "lakefs:dataset-1/<version_hash>" \
+  "$TEXERA_MODEL_MOUNT_ROOT/<owner>/<name>/<version>" \
+  --read-only --vfs-cache-mode full --daemon
+```
+
+Then launch the backend with `TEXERA_MODEL_MOUNT_ROOT=<mount root>` exported (the Python worker
+inherits it from the ComputingUnitMaster/Worker JVM).
+
+Note: lakeFS lists **branches** (e.g. `main`) as pseudo-directories but not arbitrary commit IDs, so
+you mount at the *version prefix* (`repo/<commit>`) rather than navigating to it — which is exactly the
+per-version-volume model a CSI driver uses.
+
+## Verified (sanity test)
+- Before load, the VFS cache was empty; after `transformers.pipeline(model=mount_path)` it held **only
+  the files the loader read** (~18 MB), no whole-folder pre-download.
+- `ModelFolderDocument("/models/texera/tiny-sentiment/v1 - initial").download()` returns the mount path
+  and logs `MOUNT mode: … (no download)`; the pipeline loads and predicts correctly.
+
+## Comparing A vs B
+| | Branch | What `download()` does | Local disk footprint |
+|---|---|---|---|
+| **Option A** | `proto/ml-model-ux` | streams every file to `/tmp/texera-models/<version>/` | whole folder, per pod |
+| **Option B** | `proto/ml-model-mount` | returns the mount path; FUSE fetches on read | only files actually read, node-shared, evictable |
+
+Watch the worker log line to see which path ran: `MOUNT mode: … (no download)` (B) vs the per-file
+download loop (A). Unset `TEXERA_MODEL_MOUNT_ROOT` on this branch to fall back to Option A behavior.

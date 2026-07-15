@@ -85,6 +85,10 @@ class ModelFolderDocument:
         self.cache_root = Path(
             os.getenv("TEXERA_MODEL_CACHE_DIR", "/tmp/texera-models")
         )
+        # Option B (mount): when a read-only FUSE/CSI mount of the model versions is
+        # provisioned, models live at <mount_root>/<owner>/<name>/<version>/ and are
+        # fetched lazily on read — no whole-folder download. Empty/unset => Option A.
+        self.mount_root = os.getenv("TEXERA_MODEL_MOUNT_ROOT")
 
     # ---- enumeration ----------------------------------------------------------
 
@@ -150,7 +154,29 @@ class ModelFolderDocument:
     # ---- materialization ------------------------------------------------------
 
     def download(self) -> str:
-        """Downloads every file to a local dir (cached by version) and returns its path."""
+        """Return a local folder for the model version.
+
+        Option B (mount): if ``TEXERA_MODEL_MOUNT_ROOT`` is set and the version is
+        mounted at ``<mount_root>/<owner>/<name>/<version>/``, return that path directly
+        — no bytes are downloaded here; the FUSE/CSI layer fetches files lazily on read.
+        Option A (default): download every file to a local cache dir (below).
+        """
+        if self.mount_root:
+            mounted = Path(self.mount_root).joinpath(
+                self.owner_email, self.name, self.version, self.subfolder
+            )
+            if mounted.is_dir() and any(mounted.iterdir()):
+                print(
+                    f"[ModelFolderDocument] MOUNT mode: using {mounted} (no download)",
+                    flush=True,
+                )
+                return str(mounted)
+            print(
+                f"[ModelFolderDocument] TEXERA_MODEL_MOUNT_ROOT set but {mounted} "
+                f"is not a populated mount; falling back to download",
+                flush=True,
+            )
+
         target = self.cache_root.joinpath(
             self.owner_email, self.name, self.version, self.subfolder
         )
