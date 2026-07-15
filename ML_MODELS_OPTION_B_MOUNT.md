@@ -54,3 +54,41 @@ per-version-volume model a CSI driver uses.
 
 Watch the worker log line to see which path ran: `MOUNT mode: … (no download)` (B) vs the per-file
 download loop (A). Unset `TEXERA_MODEL_MOUNT_ROOT` on this branch to fall back to Option A behavior.
+
+## Verified on Kubernetes (kind) — the production shape
+
+Ran a real single-node k8s cluster (`kind`) with the model exposed to a pod as a mounted volume,
+proving the mechanism the production `workflow-computing-unit-manager` would use.
+
+**Pod = two containers** (`bin/k8s`-style computing-unit pod):
+- `mounter` (privileged, `/dev/fuse`) — FUSE-mounts `lakefs:dataset-1/<commit>` (the lakeFS **S3
+  gateway**, reachable from pods once the node is on the `texera-lakefs` docker network) at a shared
+  volume. **This is the role a CSI driver plays in production** (`mountpoint-s3` / `csi-s3`).
+- `app` (plain busybox, unprivileged, no S3 client) — reads `/models/tiny-sentiment/*` through the
+  shared volume, oblivious that bytes come from lakeFS/MinIO. It read `config.json` and the 17.5 MB
+  `model.safetensors` on demand.
+
+**Mapping demo → production:**
+
+| Demo piece | Production equivalent |
+|---|---|
+| `mounter` container running rclone | **CSI driver** (`mountpoint-s3` CSI, or `csi-s3`) mounting the volume into the pod |
+| shared emptyDir + mount propagation | the CSI **PV/PVC** attached to the computing-unit pod |
+| `app` container reads `/models/...` | the **computing-unit (worker) pod** running the Python UDF |
+| lakeFS S3 gateway on `:8000` | same — OSS gateway exposes `s3://<repo>/<ref>/<path>` |
+| I set the pod spec by hand | **`workflow-computing-unit-manager`** builds the pod spec (it already mints the JWT + injects env in the `kubernetes` branch of `ComputingUnitManagingResource`); it would additionally attach the per-version CSI volume and set `TEXERA_MODEL_MOUNT_ROOT` |
+
+**Production integration (where the code changes go):**
+1. `ComputingUnitManagingResource` (k8s branch that creates the pod) resolves the workflow's models to
+   `(repo=dataset-{did}, commit=version_hash)` from Postgres, and for each adds a **CSI volume + a
+   read-only `volumeMount`** at `<TEXERA_MODEL_MOUNT_ROOT>/<owner>/<name>/<version>`, plus the
+   `TEXERA_MODEL_MOUNT_ROOT` env var (next to the JWT/endpoint env it already injects).
+2. `ModelFolderDocument.download()` (this branch) already returns that mount path when the env is set —
+   **no worker code change needed**.
+3. The CSI driver caches per node, so all computing-unit pods on a node share fetched bytes; immutable
+   versions make the cache always-valid.
+
+Cluster used for the check: `kind` cluster `texera-mount` (node joined to the `texera-lakefs` docker
+network). A full Texera Helm deploy was **not** run here — it needs ~30 GB of images vs the ~6 GB free
+on this box — but the mount-into-a-pod mechanism, which is the crux of Option B in production, is
+verified above.
