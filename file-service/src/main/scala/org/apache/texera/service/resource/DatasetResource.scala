@@ -1543,9 +1543,14 @@ class DatasetResource extends LazyLogging {
         LakeFSStorageClient.retrieveObjectsOfVersion(dataset.getRepositoryName, versionHash)
       }
       val prefix = if (subfolder.isEmpty) "" else subfolder + "/"
+      // Return path + checksum + size per file so pytexera's ModelFolderDocument can
+      // content-address (dedup identical files across versions) and size-route big files
+      // to a byte-ranged download.
       val files = objects
-        .map(_.getPath)
-        .filter(p => prefix.isEmpty || p == subfolder || p.startsWith(prefix))
+        .filter(o => prefix.isEmpty || o.getPath == subfolder || o.getPath.startsWith(prefix))
+        .map(o =>
+          Map("path" -> o.getPath, "checksum" -> o.getChecksum, "size" -> o.getSizeBytes)
+        )
       Response.ok(Map("files" -> files)).build()
     }
   }
