@@ -32,3 +32,8 @@ export const DATASET_FILE_RESOURCE_ENDPOINT: FileResourceEndpoint = {
   baseUrl: "dataset",
   nameParamKey: "datasetName",
 };
+
+export const MODEL_FILE_RESOURCE_ENDPOINT: FileResourceEndpoint = {
+  baseUrl: "model",
+  nameParamKey: "modelName",
+};

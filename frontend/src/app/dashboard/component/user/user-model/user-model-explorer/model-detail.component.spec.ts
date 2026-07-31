@@ -19,17 +19,20 @@
 import { ComponentFixture, TestBed } from "@angular/core/testing";
 import { ActivatedRoute } from "@angular/router";
 import { MarkdownService } from "ngx-markdown";
-import { of, throwError } from "rxjs";
+import { NzModalService } from "ng-zorro-antd/modal";
+import { NEVER, of, Subject, throwError } from "rxjs";
 
 import { ModelDetailComponent } from "./model-detail.component";
 import { ModelService } from "../../../../service/user/model/model.service";
 import { DownloadService } from "../../../../service/user/download/download.service";
 import { NotificationService } from "../../../../../common/service/notification/notification.service";
+import { AdminSettingsService } from "../../../../service/admin/settings/admin-settings.service";
 import { UserService } from "../../../../../common/service/user/user.service";
 import { StubUserService } from "../../../../../common/service/user/stub-user.service";
 import { DashboardModel } from "../../../../type/dashboard-model.interface";
 import { ModelVersion } from "../../../../../common/type/model";
 import { DatasetFileNode } from "../../../../../common/type/datasetVersionFileTree";
+import { FileUploadItem } from "../../../../type/dashboard-file.interface";
 import { commonTestImports, commonTestProviders } from "../../../../../common/testing/test-utils";
 
 function makeDashboardModel(overrides: Partial<DashboardModel["model"]> = {}, top: Partial<DashboardModel> = {}) {
@@ -90,6 +93,12 @@ describe("ModelDetailComponent", () => {
     updateModelPublicity: ReturnType<typeof vi.fn>;
     updateModelDownloadable: ReturnType<typeof vi.fn>;
     updateModelDescription: ReturnType<typeof vi.fn>;
+    getModelDiff: ReturnType<typeof vi.fn>;
+    resetModelFileDiff: ReturnType<typeof vi.fn>;
+    deleteModelFile: ReturnType<typeof vi.fn>;
+    createModelVersion: ReturnType<typeof vi.fn>;
+    multipartUpload: ReturnType<typeof vi.fn>;
+    finalizeMultipartUpload: ReturnType<typeof vi.fn>;
   };
   let downloadService: {
     downloadModelVersion: ReturnType<typeof vi.fn>;
@@ -105,6 +114,12 @@ describe("ModelDetailComponent", () => {
       updateModelPublicity: vi.fn().mockReturnValue(of({})),
       updateModelDownloadable: vi.fn().mockReturnValue(of({})),
       updateModelDescription: vi.fn().mockReturnValue(of({})),
+      getModelDiff: vi.fn().mockReturnValue(of([])),
+      resetModelFileDiff: vi.fn().mockReturnValue(of({})),
+      deleteModelFile: vi.fn().mockReturnValue(of({})),
+      createModelVersion: vi.fn().mockReturnValue(of(makeVersion({ mvid: 11, name: "v2" }))),
+      multipartUpload: vi.fn().mockReturnValue(NEVER),
+      finalizeMultipartUpload: vi.fn().mockReturnValue(of({})),
     };
     downloadService = {
       downloadModelVersion: vi.fn().mockReturnValue(of(new Blob())),
@@ -121,6 +136,8 @@ describe("ModelDetailComponent", () => {
         { provide: UserService, useClass: StubUserService },
         { provide: ActivatedRoute, useValue: { params: of({ mid: "5" }), data: of({}) } },
         { provide: MarkdownService, useValue: { parse: vi.fn(() => "") } },
+        { provide: NzModalService, useValue: { create: vi.fn() } },
+        { provide: AdminSettingsService, useValue: { getPublicSetting: vi.fn().mockReturnValue(of("20")) } },
         ...commonTestProviders,
       ],
     }).compileComponents();
@@ -363,6 +380,143 @@ describe("ModelDetailComponent", () => {
       await component.copyCurrentFilePath();
 
       expect(notificationService.error).toHaveBeenCalledWith("Failed to copy file path");
+    });
+  });
+
+  describe("upload", () => {
+    const item = (name: string): FileUploadItem =>
+      ({ file: new File(["x"], name), name, restart: false }) as unknown as FileUploadItem;
+
+    it("starts at most maxConcurrentFiles uploads and queues the rest", () => {
+      fixture.detectChanges();
+      component.maxConcurrentFiles = 2;
+
+      component.onNewUploadFilesChanged([item("a"), item("b"), item("c"), item("d")]);
+
+      expect(modelService.multipartUpload).toHaveBeenCalledTimes(2);
+      expect(component.activeCount).toBe(2);
+      expect(component.queuedCount).toBe(2);
+      expect(component.queuedFileNames).toEqual(["c", "d"]);
+    });
+
+    it("addresses the upload by owner email and model name", () => {
+      fixture.detectChanges();
+
+      component.onNewUploadFilesChanged([item("weights.pt")]);
+
+      // ownerEmail + modelName is how the backend resolves the model; datasetName would 400.
+      expect(modelService.multipartUpload).toHaveBeenCalledWith(
+        "owner@example.com",
+        "resnet",
+        "weights.pt",
+        expect.anything(),
+        expect.any(Number),
+        expect.any(Number),
+        false
+      );
+    });
+
+    it("starts the next queued upload once an active one finishes", () => {
+      fixture.detectChanges();
+      component.maxConcurrentFiles = 1;
+      const progress = new Subject<any>();
+      modelService.multipartUpload.mockReturnValueOnce(progress).mockReturnValue(NEVER);
+
+      component.onNewUploadFilesChanged([item("first"), item("second")]);
+      expect(component.queuedFileNames).toEqual(["second"]);
+
+      progress.next({ filePath: "first", percentage: 100, status: "finished", totalTime: 0 });
+
+      expect(component.queuedCount).toBe(0);
+      expect(modelService.multipartUpload).toHaveBeenCalledTimes(2);
+    });
+
+    it("removes a queued file without ever starting it", () => {
+      fixture.detectChanges();
+      component.maxConcurrentFiles = 1;
+
+      component.onNewUploadFilesChanged([item("active"), item("queued")]);
+      component.cancelExistingUpload("queued");
+
+      expect(component.queuedCount).toBe(0);
+      expect(modelService.multipartUpload).toHaveBeenCalledTimes(1);
+    });
+
+    it("aborts an in-flight upload through the model endpoints", () => {
+      fixture.detectChanges();
+      component.onNewUploadFilesChanged([item("big.pt")]);
+      const task = component.uploadTasks[0];
+
+      component.onClickAbortUploadProgress(task);
+
+      expect(modelService.finalizeMultipartUpload).toHaveBeenCalledWith("owner@example.com", "resnet", "big.pt", true);
+      expect(component.uploadTasks[0].status).toBe("aborted");
+    });
+
+    it("maps upload status onto the progress-bar states", () => {
+      expect(component.getUploadStatus("uploading")).toBe("active");
+      expect(component.getUploadStatus("initializing")).toBe("active");
+      expect(component.getUploadStatus("failed")).toBe("exception");
+      expect(component.getUploadStatus("aborted")).toBe("exception");
+      expect(component.getUploadStatus("finished")).toBe("success");
+    });
+
+    it("tracks staged changes reported by the diff and locally", () => {
+      fixture.detectChanges();
+
+      component.onStagedObjectsUpdated([
+        { path: "a.pt", pathType: "file", diffType: "added" },
+        { path: "b.pt", pathType: "file", diffType: "removed" },
+      ]);
+
+      expect(component.pendingChangesCount).toBe(2);
+      expect(component.userHasPendingChanges).toBe(true);
+      expect(component.hasAnyActivity).toBe(true);
+    });
+
+    it("stages a deletion by relative path and reports it", () => {
+      fixture.detectChanges();
+
+      component.onPreviouslyUploadedFileDeleted(fileNode("model.pt"));
+
+      // Relative to the version root, which is what the backend's diff API expects.
+      expect(modelService.deleteModelFile).toHaveBeenCalledWith(5, "model.pt");
+      expect(component.pendingChangesCount).toBe(1);
+    });
+
+    it("creates a version, clears staged state and refetches the version list", () => {
+      fixture.detectChanges();
+      component.onStagedObjectsUpdated([{ path: "a.pt", pathType: "file", diffType: "added" }]);
+      component.versionName = "  v2  ";
+      modelService.retrieveModelVersionList.mockClear();
+
+      component.onClickCreateVersion();
+
+      expect(modelService.createModelVersion).toHaveBeenCalledWith(5, "v2");
+      expect(component.versionName).toBe("");
+      expect(component.pendingChangesCount).toBe(0);
+      expect(modelService.retrieveModelVersionList).toHaveBeenCalledWith(5);
+      expect(component.isCreatingVersion).toBe(false);
+    });
+
+    it("ignores a second submit while one is already in flight", () => {
+      fixture.detectChanges();
+      modelService.createModelVersion.mockReturnValue(NEVER);
+
+      component.onClickCreateVersion();
+      component.onClickCreateVersion();
+
+      expect(modelService.createModelVersion).toHaveBeenCalledTimes(1);
+    });
+
+    it("surfaces a version-creation failure and clears the loading flag", () => {
+      fixture.detectChanges();
+      modelService.createModelVersion.mockReturnValue(throwError(() => ({ error: { message: "nothing staged" } })));
+
+      component.onClickCreateVersion();
+
+      expect(notificationService.error).toHaveBeenCalledWith("Version creation failed: nothing staged");
+      expect(component.isCreatingVersion).toBe(false);
     });
   });
 });

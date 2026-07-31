@@ -153,6 +153,7 @@ import { UserDatasetComponent } from "./dashboard/component/user/user-dataset/us
 import { UserModelComponent } from "./dashboard/component/user/user-model/user-model.component";
 import { ModelDetailComponent } from "./dashboard/component/user/user-model/user-model-explorer/model-detail.component";
 import { UserModelCreatorComponent } from "./dashboard/component/user/user-model/user-model-creator/user-model-creator.component";
+import { UserModelStagedObjectsListComponent } from "./dashboard/component/user/user-model/user-model-explorer/user-model-staged-objects-list/user-model-staged-objects-list.component";
 import { UserDatasetVersionCreatorComponent } from "./dashboard/component/user/user-dataset/user-dataset-explorer/user-dataset-version-creator/user-dataset-version-creator.component";
 import { DatasetDetailComponent } from "./dashboard/component/user/user-dataset/user-dataset-explorer/dataset-detail.component";
 import { UserDatasetVersionFiletreeComponent } from "./dashboard/component/user/user-dataset/user-dataset-explorer/user-dataset-version-filetree/user-dataset-version-filetree.component";
@@ -326,6 +327,7 @@ registerLocaleData(en);
     UserModelComponent,
     ModelDetailComponent,
     UserModelCreatorComponent,
+    UserModelStagedObjectsListComponent,
     UserDatasetVersionCreatorComponent,
     DatasetDetailComponent,
     UserDatasetVersionFiletreeComponent,

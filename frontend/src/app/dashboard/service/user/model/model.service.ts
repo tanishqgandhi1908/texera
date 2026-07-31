@@ -23,7 +23,10 @@ import { map, switchMap } from "rxjs/operators";
 import { AppSettings } from "../../../../common/app-setting";
 import { Model, ModelVersion } from "../../../../common/type/model";
 import { DatasetFileNode } from "../../../../common/type/datasetVersionFileTree";
+import { DatasetStagedObject } from "../../../../common/type/dataset-staged-object";
 import { DashboardModel } from "../../../type/dashboard-model.interface";
+import { MultipartUploadProgress, MultipartUploadService } from "../file-resource/multipart-upload.service";
+import { MODEL_FILE_RESOURCE_ENDPOINT } from "../file-resource/file-resource-endpoint";
 
 export const MODEL_BASE_URL = "model";
 export const MODEL_CREATE_URL = MODEL_BASE_URL + "/create";
@@ -66,7 +69,10 @@ export function validateModelName(name: string): string | null {
   providedIn: "root",
 })
 export class ModelService {
-  constructor(private http: HttpClient) {}
+  constructor(
+    private http: HttpClient,
+    private multipartUploadService: MultipartUploadService
+  ) {}
 
   public createModel(model: Model): Observable<DashboardModel> {
     return this.http.post<DashboardModel>(`${AppSettings.getApiEndpoint()}/${MODEL_CREATE_URL}`, {
@@ -124,6 +130,79 @@ export class ModelService {
 
   public retrieveOwners(): Observable<string[]> {
     return this.http.get<string[]>(`${AppSettings.getApiEndpoint()}/${MODEL_GET_OWNERS_URL}`);
+  }
+
+  public createModelVersion(mid: number, newVersion: string): Observable<ModelVersion> {
+    return this.http
+      .post<{
+        modelVersion: ModelVersion;
+        fileNodes: DatasetFileNode[];
+      }>(`${AppSettings.getApiEndpoint()}/${MODEL_BASE_URL}/${mid}/version/create`, newVersion, {
+        headers: { "Content-Type": "text/plain" },
+      })
+      .pipe(
+        map(response => {
+          response.modelVersion.fileNodes = response.fileNodes;
+          return response.modelVersion;
+        })
+      );
+  }
+
+  /** Staged (uncommitted) changes for a model. */
+  public getModelDiff(mid: number): Observable<DatasetStagedObject[]> {
+    return this.http.get<DatasetStagedObject[]>(`${AppSettings.getApiEndpoint()}/${MODEL_BASE_URL}/${mid}/diff`);
+  }
+
+  /** Discards one staged change. */
+  public resetModelFileDiff(mid: number, filePath: string): Observable<Response> {
+    const params = new HttpParams().set("filePath", encodeURIComponent(filePath));
+
+    return this.http.put<Response>(`${AppSettings.getApiEndpoint()}/${MODEL_BASE_URL}/${mid}/diff`, {}, { params });
+  }
+
+  /** Stages the removal of a committed file; applied when the next version is created. */
+  public deleteModelFile(mid: number, filePath: string): Observable<Response> {
+    const params = new HttpParams().set("filePath", encodeURIComponent(filePath));
+
+    return this.http.delete<Response>(`${AppSettings.getApiEndpoint()}/${MODEL_BASE_URL}/${mid}/file`, { params });
+  }
+
+  // ─── multipart upload, over the shared engine ───────────────────────────────
+
+  public multipartUpload(
+    ownerEmail: string,
+    modelName: string,
+    filePath: string,
+    file: File,
+    partSize: number,
+    concurrencyLimit: number,
+    restart: boolean
+  ): Observable<MultipartUploadProgress> {
+    return this.multipartUploadService.multipartUpload(
+      MODEL_FILE_RESOURCE_ENDPOINT,
+      ownerEmail,
+      modelName,
+      filePath,
+      file,
+      partSize,
+      concurrencyLimit,
+      restart
+    );
+  }
+
+  public finalizeMultipartUpload(
+    ownerEmail: string,
+    modelName: string,
+    filePath: string,
+    isAbort: boolean
+  ): Observable<Response> {
+    return this.multipartUploadService.finalizeMultipartUpload(
+      MODEL_FILE_RESOURCE_ENDPOINT,
+      ownerEmail,
+      modelName,
+      filePath,
+      isAbort
+    );
   }
 
   /**
