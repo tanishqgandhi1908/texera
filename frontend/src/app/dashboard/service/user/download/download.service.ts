@@ -25,7 +25,7 @@ import { NotificationService } from "../../../../common/service/notification/not
 import { DatasetService } from "../dataset/dataset.service";
 import { ModelService } from "../model/model.service";
 import { WorkflowPersistService } from "src/app/common/service/workflow-persist/workflow-persist.service";
-import * as JSZip from "jszip";
+import JSZip from "jszip";
 import { Workflow } from "../../../../common/type/workflow";
 import { HttpClient, HttpResponse } from "@angular/common/http";
 import { WORKFLOW_EXECUTIONS_API_BASE_URL } from "../workflow-executions/workflow-executions.service";

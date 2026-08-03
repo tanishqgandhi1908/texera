@@ -21,9 +21,7 @@ package org.apache.texera.service.`type`
 
 import io.lakefs.clients.sdk.model.ObjectStats
 import org.apache.texera.amber.core.storage.ResourceType
-import org.apache.texera.amber.core.storage.util.dataset.PhysicalFileNode
 
-import java.util
 import scala.collection.mutable
 
 // DatasetFileNode represents a unique file in a versioned resource. Its full path is in the
@@ -175,59 +173,6 @@ object DatasetFileNode {
     sortChildrenRecursively(rootNode)
 
     rootNode.getChildren
-  }
-
-  /** Physical (on-disk) file trees exist only for datasets. */
-  def fromPhysicalFileNodes(
-      map: Map[(String, String, String), List[PhysicalFileNode]]
-  ): List[DatasetFileNode] = {
-    val (rootNode, versionNodes) = buildVersionSkeleton(ResourceType.Datasets, map.keys)
-
-    map.foreach {
-      case (key, physicalNodes) =>
-        physicalNodes.foreach(node => addNodeToTree(versionNodes(key), node, key._1))
-    }
-
-    sortChildrenRecursively(rootNode)
-
-    rootNode.getChildren
-  }
-
-  private def addNodeToTree(
-      parentNode: DatasetFileNode,
-      physicalNode: PhysicalFileNode,
-      ownerEmail: String
-  ): Unit = {
-    val queue = new util.LinkedList[(DatasetFileNode, PhysicalFileNode)]()
-    queue.add((parentNode, physicalNode))
-
-    while (!queue.isEmpty) {
-      val (currentParent, currentPhysicalNode) = queue.poll()
-      val relativePath = currentPhysicalNode.getRelativePath.toString.split("/").toList
-      val nodeName = relativePath.last
-
-      val fileType =
-        if (currentPhysicalNode.isDirectory) "directory" else "file"
-      val fileSize =
-        if (fileType == "file") Some(currentPhysicalNode.getSize) else None
-      val existingNode = currentParent.getChildren.find(child =>
-        child.getName == nodeName && child.getNodeType == fileType
-      )
-      val fileNode = existingNode.getOrElse {
-        val newNode = new DatasetFileNode(
-          nodeName,
-          fileType,
-          currentParent,
-          ownerEmail,
-          fileSize
-        )
-        currentParent.children = Some(currentParent.getChildren :+ newNode)
-        newNode
-      }
-
-      // Add children of the current physical node to the queue
-      currentPhysicalNode.getChildren.forEach(child => queue.add((fileNode, child)))
-    }
   }
 
   /**

@@ -23,17 +23,35 @@ SET search_path TO texera_db;
 
 BEGIN;
 
--- Per-user access control for models.
--- Enables the model management API to grant/list/revoke READ/WRITE access.
+-- Introduce ML models as a first-class resource (own primary key `mid`, own LakeFS repo namespace)
+-- and add model-specific attributes (framework, format).
 
-CREATE TABLE IF NOT EXISTS model_user_access
+CREATE TABLE IF NOT EXISTS model
 (
-    mid       INT NOT NULL,
-    uid       INT NOT NULL,
-    privilege privilege_enum NOT NULL DEFAULT 'NONE',
-    PRIMARY KEY (mid, uid),
-    FOREIGN KEY (mid) REFERENCES model(mid) ON DELETE CASCADE,
-    FOREIGN KEY (uid) REFERENCES "user"(uid) ON DELETE CASCADE
+    mid             SERIAL PRIMARY KEY,
+    owner_uid       INT NOT NULL,
+    name            VARCHAR(128) NOT NULL,
+    repository_name VARCHAR(128),
+    is_public       BOOLEAN NOT NULL DEFAULT TRUE,
+    is_downloadable BOOLEAN NOT NULL DEFAULT TRUE,
+    description     TEXT NOT NULL,
+    creation_time   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    cover_image     varchar(255),
+    framework       VARCHAR(32),
+    format          VARCHAR(32),
+    FOREIGN KEY (owner_uid) REFERENCES "user"(uid) ON DELETE CASCADE,
+    UNIQUE (owner_uid, name)
+);
+
+CREATE TABLE IF NOT EXISTS model_version
+(
+    mvid          SERIAL PRIMARY KEY,
+    mid           INT NOT NULL,
+    creator_uid   INT NOT NULL,
+    name          VARCHAR(128) NOT NULL,
+    version_hash  VARCHAR(64) NOT NULL,
+    creation_time TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (mid) REFERENCES model(mid) ON DELETE CASCADE
 );
 
 COMMIT;
