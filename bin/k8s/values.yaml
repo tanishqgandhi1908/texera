@@ -327,9 +327,11 @@ texeraEnvVars:
   - name: MAX_NUM_OF_RUNNING_COMPUTING_UNITS_PER_USER
     value: "10"
   - name: KUBERNETES_COMPUTING_UNIT_CPU_LIMIT_OPTIONS
-    value: "2"
+    value: "2,4"
+  # A mounted model is read into the pod's memory when the UDF loads it, so offer sizes
+  # above 2Gi: a ~1GB checkpoint peaks near 2.5GB while torch.load materialises it.
   - name: KUBERNETES_COMPUTING_UNIT_MEMORY_LIMIT_OPTIONS
-    value: "2Gi"
+    value: "2Gi,4Gi,8Gi"
   - name: KUBERNETES_COMPUTING_UNIT_GPU_LIMIT_OPTIONS
     value: "0"
   - name: COMPUTING_UNIT_LOCAL_ENABLED

@@ -63,3 +63,36 @@ postgresql:
       initialDelaySeconds: 30
     readinessProbe:
       initialDelaySeconds: 30
+    persistence:
+      enabled: true
+      size: 10Gi
+      # minikube ships "standard" (k8s.io/minikube-hostpath); the chart's default
+      # "local-path" provisioner is not installed there, so its PVCs stay Pending.
+      storageClass: standard
+      existingClaim: "postgresql-data-pvc"
+
+minio:
+  persistence:
+    enabled: true
+    size: 20Gi
+    storageClass: standard
+    existingClaim: "minio-data-pvc"
+
+lakefs:
+  # Presigned upload/download URLs must name a host that both the browser and the
+  # in-cluster services can reach. The chart default (localhost:31000) only works when
+  # MinIO's NodePort happens to be on the caller's own loopback, which is true for
+  # neither on minikube -- use the node IP instead.
+  lakefsConfig: |
+    database:
+      type: postgres
+    blockstore:
+      type: s3
+      s3:
+        endpoint: http://texera-minio:9000
+        pre_signed_expiry: 15m
+        pre_signed_endpoint: http://192.168.58.2:31000
+        force_path_style: true
+        credentials:
+          access_key_id: texera_minio
+          secret_access_key: password
