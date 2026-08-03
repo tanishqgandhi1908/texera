@@ -32,6 +32,7 @@ import { UserService } from "../../../../common/service/user/user.service";
 import { GmailService } from "../../../../common/service/gmail/gmail.service";
 import { NotificationService } from "../../../../common/service/notification/notification.service";
 import { DatasetService } from "../../../service/user/dataset/dataset.service";
+import { ModelService } from "../../../service/user/model/model.service";
 import { WorkflowPersistService } from "src/app/common/service/workflow-persist/workflow-persist.service";
 import { WorkflowActionService } from "src/app/workspace/service/workflow-graph/model/workflow-action.service";
 import { Privilege } from "../../../type/share-access.interface";
@@ -63,6 +64,10 @@ describe("ShareAccessComponent", () => {
     getDataset: ReturnType<typeof vi.fn>;
     updateDatasetPublicity: ReturnType<typeof vi.fn>;
   };
+  let modelServiceSpy: {
+    getModel: ReturnType<typeof vi.fn>;
+    updateModelPublicity: ReturnType<typeof vi.fn>;
+  };
   let workflowActionSpy: { setWorkflowIsPublished: ReturnType<typeof vi.fn> };
   let userServiceCurrentEmail: string | undefined;
   let capturedModalConfigs: any[];
@@ -89,6 +94,7 @@ describe("ShareAccessComponent", () => {
         { provide: NzModalRef, useValue: modalRefSpy },
         { provide: WorkflowPersistService, useValue: workflowPersistSpy },
         { provide: DatasetService, useValue: datasetServiceSpy },
+        { provide: ModelService, useValue: modelServiceSpy },
         { provide: WorkflowActionService, useValue: workflowActionSpy },
       ],
     });
@@ -123,6 +129,10 @@ describe("ShareAccessComponent", () => {
     datasetServiceSpy = {
       getDataset: vi.fn().mockReturnValue(of({ dataset: { isPublic: false } })),
       updateDatasetPublicity: vi.fn().mockReturnValue(of(null)),
+    };
+    modelServiceSpy = {
+      getModel: vi.fn().mockReturnValue(of({ model: { isPublic: false } })),
+      updateModelPublicity: vi.fn().mockReturnValue(of(null)),
     };
     workflowActionSpy = { setWorkflowIsPublished: vi.fn() };
   });
@@ -163,10 +173,29 @@ describe("ShareAccessComponent", () => {
       expect(c.isPublic).toBe(true);
     });
 
-    it("does not query publish state for non-workflow/dataset types", () => {
+    it("loads publish state for model via ModelService.getModel", () => {
+      modelServiceSpy.getModel.mockReturnValue(of({ model: { isPublic: true } }));
+      const c = setupComponent({ type: "model", id: 15 });
+      expect(modelServiceSpy.getModel).toHaveBeenCalledWith(15);
+      expect(c.isPublic).toBe(true);
+    });
+
+    it("sets isPublic to false for a private model, so the publish toggle still renders", () => {
+      modelServiceSpy.getModel.mockReturnValue(of({ model: { isPublic: false } }));
+      const c = setupComponent({ type: "model", id: 15 });
+      expect(c.isPublic).toBe(false);
+    });
+
+    it("does not query publish state for non-workflow/dataset/model types", () => {
       setupComponent({ type: "project", id: 4 });
       expect(workflowPersistSpy.getWorkflowIsPublished).not.toHaveBeenCalled();
       expect(datasetServiceSpy.getDataset).not.toHaveBeenCalled();
+      expect(modelServiceSpy.getModel).not.toHaveBeenCalled();
+    });
+
+    it("leaves isPublic null for a computing-unit, keeping the toggle hidden", () => {
+      const c = setupComponent({ type: "computing-unit", id: 4 });
+      expect(c.isPublic).toBeNull();
     });
   });
 
@@ -249,6 +278,11 @@ describe("ShareAccessComponent", () => {
     it("uses the dataset dashboard path when sharing a dataset", () => {
       const message = grantAndCaptureMessage(setupComponent({ type: "dataset", id: 22 }));
       expect(message).toContain("/user/dataset/22");
+    });
+
+    it("uses the model dashboard path when sharing a model", () => {
+      const message = grantAndCaptureMessage(setupComponent({ type: "model", id: 27 }));
+      expect(message).toContain("/user/model/27");
     });
 
     it("uses the project dashboard path when sharing a project", () => {
@@ -427,6 +461,14 @@ describe("ShareAccessComponent", () => {
       expect(datasetServiceSpy.updateDatasetPublicity).toHaveBeenCalledWith(9);
     });
 
+    it("publishes a model on confirm", () => {
+      modelServiceSpy.getModel.mockReturnValue(of({ model: { isPublic: false } }));
+      const c = setupComponent({ type: "model", id: 14 });
+      c.verifyPublish();
+      getFooterButton(capturedModalConfigs[0], "Publish").onClick();
+      expect(modelServiceSpy.updateModelPublicity).toHaveBeenCalledWith(14);
+    });
+
     it("does not open the publish modal when the item is already public", () => {
       workflowPersistSpy.getWorkflowIsPublished.mockReturnValue(of("Public"));
       const c = setupComponent({ type: "workflow" });
@@ -449,6 +491,14 @@ describe("ShareAccessComponent", () => {
       c.verifyUnpublish();
       getFooterButton(capturedModalConfigs[0], "Unpublish").onClick();
       expect(datasetServiceSpy.updateDatasetPublicity).toHaveBeenCalledWith(9);
+    });
+
+    it("unpublishes a model on confirm", () => {
+      modelServiceSpy.getModel.mockReturnValue(of({ model: { isPublic: true } }));
+      const c = setupComponent({ type: "model", id: 14 });
+      c.verifyUnpublish();
+      getFooterButton(capturedModalConfigs[0], "Unpublish").onClick();
+      expect(modelServiceSpy.updateModelPublicity).toHaveBeenCalledWith(14);
     });
 
     it("does not open the unpublish modal when the item is already private", () => {
@@ -510,6 +560,58 @@ describe("ShareAccessComponent", () => {
       c.unpublishDataset();
       expect(c.isPublic).toBe(false);
       expect(notificationSpy.success).toHaveBeenCalledWith("Dataset unpublished successfully");
+    });
+
+    it("publishModel flips isPublic and shows a success notification", () => {
+      modelServiceSpy.getModel.mockReturnValue(of({ model: { isPublic: false } }));
+      const c = setupComponent({ type: "model" });
+      c.publishModel();
+      expect(c.isPublic).toBe(true);
+      expect(notificationSpy.success).toHaveBeenCalledWith("Model published successfully");
+    });
+
+    it("publishModel leaves isPublic unchanged and surfaces HttpErrorResponse", () => {
+      modelServiceSpy.getModel.mockReturnValue(of({ model: { isPublic: false } }));
+      modelServiceSpy.updateModelPublicity.mockReturnValue(
+        throwError(() => new HttpErrorResponse({ error: { message: "model publish failed" }, status: 500 }))
+      );
+      const c = setupComponent({ type: "model" });
+      c.publishModel();
+      expect(c.isPublic).toBe(false);
+      expect(notificationSpy.error).toHaveBeenCalledWith("model publish failed");
+    });
+
+    it("unpublishModel flips isPublic to false and shows a success notification", () => {
+      modelServiceSpy.getModel.mockReturnValue(of({ model: { isPublic: true } }));
+      const c = setupComponent({ type: "model" });
+      c.unpublishModel();
+      expect(c.isPublic).toBe(false);
+      expect(notificationSpy.success).toHaveBeenCalledWith("Model unpublished successfully");
+    });
+
+    it("unpublishModel leaves isPublic unchanged and surfaces HttpErrorResponse", () => {
+      modelServiceSpy.getModel.mockReturnValue(of({ model: { isPublic: true } }));
+      modelServiceSpy.updateModelPublicity.mockReturnValue(
+        throwError(() => new HttpErrorResponse({ error: { message: "model unpublish failed" }, status: 500 }))
+      );
+      const c = setupComponent({ type: "model" });
+      c.unpublishModel();
+      expect(c.isPublic).toBe(true);
+      expect(notificationSpy.error).toHaveBeenCalledWith("model unpublish failed");
+    });
+
+    it("publishModel is a no-op when the model is already public", () => {
+      modelServiceSpy.getModel.mockReturnValue(of({ model: { isPublic: true } }));
+      const c = setupComponent({ type: "model" });
+      c.publishModel();
+      expect(modelServiceSpy.updateModelPublicity).not.toHaveBeenCalled();
+    });
+
+    it("unpublishModel is a no-op when the model is already private", () => {
+      modelServiceSpy.getModel.mockReturnValue(of({ model: { isPublic: false } }));
+      const c = setupComponent({ type: "model" });
+      c.unpublishModel();
+      expect(modelServiceSpy.updateModelPublicity).not.toHaveBeenCalled();
     });
   });
 

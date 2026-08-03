@@ -20,6 +20,9 @@ import { UntilDestroy, untilDestroyed } from "@ngneat/until-destroy";
 import { AfterViewInit, Component, ViewChild } from "@angular/core";
 import { Router } from "@angular/router";
 import { firstValueFrom } from "rxjs";
+import { ActionType, EntityType, HubService } from "../../../../hub/service/hub.service";
+import { isDefined } from "../../../../common/util/predicate";
+import { SearchService } from "../../../service/user/search.service";
 import { NzModalService } from "ng-zorro-antd/modal";
 import { UserService } from "../../../../common/service/user/user.service";
 import { ModelService } from "../../../service/user/model/model.service";
@@ -89,7 +92,9 @@ export class UserModelComponent implements AfterViewInit {
     private userService: UserService,
     private modelService: ModelService,
     private modalService: NzModalService,
-    private router: Router
+    private router: Router,
+    private hubService: HubService,
+    private searchService: SearchService
   ) {
     this.userService
       .userChanged()
@@ -132,12 +137,77 @@ export class UserModelComponent implements AfterViewInit {
     this.searchResultsComponent.reset(async (start, count) => {
       const models = await this.accessibleModels();
       const matching = this.sortModels(models.filter(model => this.matchesKeyword(model)));
+      const entries = matching.slice(start, start + count).map(model => new DashboardEntry(model));
+      await this.attachHubStats(entries);
       return {
-        entries: matching.slice(start, start + count).map(model => new DashboardEntry(model)),
+        entries,
         more: start + count < matching.length,
       };
     });
     await this.searchResultsComponent.loadMore();
+  }
+
+  /**
+   * Fills owner names, view/like counts and liked state on the page's entries. The Models list
+   * comes from /model/list rather than dashboard search, so nothing else populates them.
+   */
+  private async attachHubStats(entries: DashboardEntry[]): Promise<void> {
+    const mids = entries.map(entry => entry.model.model.mid).filter(isDefined);
+    if (mids.length === 0) {
+      return;
+    }
+    const types = mids.map(() => EntityType.Model);
+
+    await this.attachOwnerNames(entries);
+
+    try {
+      const counts = await firstValueFrom(this.hubService.getCounts(types, mids, [ActionType.View, ActionType.Like]));
+      entries.forEach((entry, i) => {
+        entry.viewCount = counts[i]?.counts.view ?? 0;
+        entry.likeCount = counts[i]?.counts.like ?? 0;
+      });
+    } catch {
+      // Counts are decoration; a hub outage must not empty the list.
+    }
+
+    // Drives the card's link target: accessible models open in Your Work, others in the hub.
+    try {
+      const access = await firstValueFrom(this.hubService.getUserAccess(types, mids));
+      const accessByMid = new Map(access.map(entry => [entry.entityId, entry.userIds]));
+      entries.forEach(entry => entry.setAccessUsers(accessByMid.get(entry.model.model.mid!) ?? []));
+    } catch {
+      // Same as above.
+    }
+
+    if (!isDefined(this.currentUid)) {
+      return;
+    }
+    try {
+      const liked = await firstValueFrom(this.hubService.isLiked(mids, types));
+      entries.forEach((entry, i) => (entry.isLiked = liked[i]?.isLiked ?? false));
+    } catch {
+      // Same as above.
+    }
+  }
+
+  /** Resolves owner uids to display names so cards show the real username, not the placeholder. */
+  private async attachOwnerNames(entries: DashboardEntry[]): Promise<void> {
+    const ownerIds = Array.from(new Set(entries.map(entry => entry.model.model.ownerUid).filter(isDefined)));
+    if (ownerIds.length === 0) {
+      return;
+    }
+    try {
+      const userInfo = await firstValueFrom(this.searchService.getUserInfo(ownerIds));
+      entries.forEach(entry => {
+        const info = userInfo[entry.model.model.ownerUid!];
+        if (info) {
+          entry.setOwnerName(info.userName);
+          entry.setOwnerGoogleAvatar(info.googleAvatar ?? "");
+        }
+      });
+    } catch {
+      // Falls back to the placeholder name rather than emptying the list.
+    }
   }
 
   public deleteModel(entry: DashboardEntry): void {

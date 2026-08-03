@@ -53,6 +53,7 @@ import { NotificationService } from "../../../../common/service/notification/not
 import { extractErrorMessage } from "../../../../common/util/error";
 import {
   HUB_DATASET_RESULT_DETAIL,
+  HUB_MODEL_RESULT_DETAIL,
   HUB_WORKFLOW_RESULT_DETAIL,
   USER_DATASET,
   USER_MODEL,
@@ -179,7 +180,12 @@ export class ListItemComponent implements OnChanges {
       if (typeof this.entry.id === "number") {
         this.disableDelete = !this.entry.model.isOwner;
         // accessibleUserIds is populated only by dashboard/search
-        this.entryLink = [USER_MODEL, String(this.entry.id)];
+        this.owners = this.entry.accessibleUserIds;
+        if (this.currentUid !== undefined && this.owners.includes(this.currentUid)) {
+          this.entryLink = [USER_MODEL, String(this.entry.id)];
+        } else {
+          this.entryLink = [HUB_MODEL_RESULT_DETAIL, String(this.entry.id)];
+        }
         this.iconType = "experiment";
         this.size = this.entry.size;
       }
@@ -284,6 +290,8 @@ export class ListItemComponent implements OnChanges {
         .subscribe();
     } else if (this.entry.type === "dataset") {
       this.downloadService.downloadDataset(this.entry.id, this.entry.name).pipe(untilDestroyed(this)).subscribe();
+    } else if (this.entry.type === "model") {
+      this.downloadService.downloadModel(this.entry.id, this.entry.name).pipe(untilDestroyed(this)).subscribe();
     }
   };
 

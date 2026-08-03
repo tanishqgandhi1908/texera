@@ -106,7 +106,7 @@
   </nz-dropdown-menu>
 
   <a
-    *ngIf="this.isLogin"
+    *ngIf="this.isLogin && isWorkflowSearch"
     [nzDropdownMenu]="IDSearchOptions"
     nz-dropdown
     nzTrigger="click"
@@ -140,6 +140,7 @@
   </nz-dropdown-menu>
 
   <a
+    *ngIf="isWorkflowSearch"
     [nzDropdownMenu]="operatorSearchOptions"
     nz-dropdown
     nzTrigger="click"
@@ -179,7 +180,7 @@
   </nz-dropdown-menu>
 
   <a
-    *ngIf="pid === undefined"
+    *ngIf="pid === undefined && isWorkflowSearch"
     [nzDropdownMenu]="projectSearchOptions"
     nz-dropdown
     nzTrigger="click"

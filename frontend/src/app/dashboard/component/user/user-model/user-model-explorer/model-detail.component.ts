@@ -44,6 +44,9 @@ import { NzInputDirective } from "ng-zorro-antd/input";
 import { NzDividerComponent } from "ng-zorro-antd/divider";
 import { CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkVirtualScrollViewport } from "@angular/cdk/scrolling";
 
+import { ActionType, EntityType, HubService } from "../../../../../hub/service/hub.service";
+import { isDefined } from "../../../../../common/util/predicate";
+import { formatCount } from "../../../../../common/util/format.util";
 import { ModelService } from "../../../../service/user/model/model.service";
 import { DownloadService } from "../../../../service/user/download/download.service";
 import { NotificationService } from "../../../../../common/service/notification/notification.service";
@@ -136,10 +139,15 @@ export class ModelDetailComponent implements OnInit {
 
   public versions: ReadonlyArray<ModelVersion> = [];
   public selectedVersion: ModelVersion | undefined;
+  public coverImageUrl: string | null = null;
+  public likeCount: number = 0;
+  public viewCount: number = 0;
+  public isLiked: boolean = false;
   public fileTreeNodeList: DatasetFileNode[] = [];
   public selectedVersionCreationTime: string = "";
 
   public isLogin: boolean = this.userService.isLogin();
+  public currentUid: number | undefined = this.userService.getCurrentUser()?.uid;
 
   // ─── upload state ─────────────────────────────────────────────────────────
 
@@ -183,13 +191,15 @@ export class ModelDetailComponent implements OnInit {
     private notificationService: NotificationService,
     private downloadService: DownloadService,
     private userService: UserService,
-    private adminSettingsService: AdminSettingsService
+    private adminSettingsService: AdminSettingsService,
+    private hubService: HubService
   ) {
     this.userService
       .userChanged()
       .pipe(untilDestroyed(this))
       .subscribe(() => {
         this.isLogin = this.userService.isLogin();
+        this.currentUid = this.userService.getCurrentUser()?.uid;
       });
   }
 
@@ -214,6 +224,7 @@ export class ModelDetailComponent implements OnInit {
           this.retrieveModelInfo();
           this.retrieveModelVersionList();
           this.loadUploadSettings();
+          this.loadHubStats();
           return this.route.data;
         }),
         untilDestroyed(this)
@@ -237,6 +248,11 @@ export class ModelDetailComponent implements OnInit {
           this.modelFormat = model.format;
           this.ownerEmail = dashboardModel.ownerEmail;
           this.isOwner = dashboardModel.isOwner;
+          if (model.coverImage) {
+            this.loadCoverImageUrl(this.mid!);
+          } else {
+            this.coverImageUrl = null;
+          }
           if (typeof model.creationTime === "number") {
             const date = new Date(model.creationTime);
             this.modelCreationTime = format(date, "MM/dd/yyyy HH:mm:ss");
@@ -253,10 +269,97 @@ export class ModelDetailComponent implements OnInit {
     }
   }
 
+  /** Records a view and loads the like count / liked state, mirroring the dataset page. */
+  private loadHubStats(): void {
+    if (!isDefined(this.mid)) {
+      return;
+    }
+    const mid = this.mid;
+
+    this.hubService
+      .getCounts([EntityType.Model], [mid], [ActionType.Like])
+      .pipe(untilDestroyed(this))
+      .subscribe(counts => (this.likeCount = counts[0]?.counts.like ?? 0));
+
+    this.hubService
+      .postView(mid, this.currentUid ?? 0, EntityType.Model)
+      .pipe(untilDestroyed(this))
+      .subscribe(count => (this.viewCount = count));
+
+    if (!isDefined(this.currentUid)) {
+      return;
+    }
+
+    this.hubService
+      .isLiked([mid], [EntityType.Model])
+      .pipe(untilDestroyed(this))
+      .subscribe(liked => (this.isLiked = liked.length > 0 && liked[0].isLiked));
+  }
+
+  private refreshLikeCount(mid: number): void {
+    this.hubService
+      .getCounts([EntityType.Model], [mid], [ActionType.Like])
+      .pipe(untilDestroyed(this))
+      .subscribe(counts => (this.likeCount = counts[0]?.counts.like ?? 0));
+  }
+
+  toggleLike(): void {
+    if (!isDefined(this.currentUid) || !isDefined(this.mid)) {
+      return;
+    }
+    const mid = this.mid;
+
+    const action$ = this.isLiked
+      ? this.hubService.postUnlike(mid, EntityType.Model)
+      : this.hubService.postLike(mid, EntityType.Model);
+
+    action$.pipe(untilDestroyed(this)).subscribe((success: boolean) => {
+      if (success) {
+        this.isLiked = !this.isLiked;
+        this.refreshLikeCount(mid);
+      }
+    });
+  }
+
+  private loadCoverImageUrl(mid: number): void {
+    this.modelService
+      .getModelCoverUrl(mid)
+      .pipe(untilDestroyed(this))
+      .subscribe({
+        next: ({ url }) => (this.coverImageUrl = url),
+        error: () => (this.coverImageUrl = null),
+      });
+  }
+
+  onSetCoverImage(filePath: string): void {
+    if (!this.mid || !this.selectedVersion) {
+      return;
+    }
+    const mid = this.mid;
+    // The backend resolves the path under the model root, which starts at the version.
+    const newCoverPath = `${this.selectedVersion.name}/${filePath}`;
+    this.modelService
+      .updateModelCoverImage(mid, newCoverPath)
+      .pipe(untilDestroyed(this))
+      .subscribe({
+        next: () => {
+          this.loadCoverImageUrl(mid);
+          this.notificationService.success("Cover image updated.");
+        },
+        error: (err: unknown) => {
+          this.notificationService.error(
+            err instanceof HttpErrorResponse
+              ? err.error?.message || "Failed to set cover image"
+              : "Failed to set cover image"
+          );
+        },
+      });
+  }
+
   retrieveModelVersionList(): void {
     if (this.mid) {
       this.modelService
-        .retrieveModelVersionList(this.mid)
+        .retrieveModelVersionList(this.mid, this.isLogin)
         .pipe(untilDestroyed(this))
         .subscribe(versions => {
           this.versions = versions;
@@ -273,7 +376,7 @@ export class ModelDetailComponent implements OnInit {
     this.selectedVersion = version;
     if (this.mid && this.selectedVersion.mvid) {
       this.modelService
-        .retrieveModelVersionFileTree(this.mid, this.selectedVersion.mvid)
+        .retrieveModelVersionFileTree(this.mid, this.selectedVersion.mvid, this.isLogin)
         .pipe(untilDestroyed(this))
         .subscribe(data => {
           this.fileTreeNodeList = data.fileNodes;
@@ -756,4 +859,6 @@ export class ModelDetailComponent implements OnInit {
   formatTime = formatTime;
 
   formatSize = formatSize;
+
+  formatCount = formatCount;
 }

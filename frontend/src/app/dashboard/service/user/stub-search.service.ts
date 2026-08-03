@@ -44,7 +44,7 @@ export class StubSearchService {
     params: SearchFilterParameters,
     start: number,
     count: number,
-    type: "workflow" | "project" | "file" | "dataset" | null,
+    type: "workflow" | "project" | "file" | "dataset" | "model" | null,
     orderBy: SortMethod,
     isLogin: boolean = true,
     includePublic: boolean = false
@@ -52,13 +52,12 @@ export class StubSearchService {
     // Igoring start count and orderBy as they are not tested in the unit tests.
     return new Observable(observer => {
       observer.next({
-        results: searchTestEntries(keywords, params, this.testEntries, type)
-          .filter(i => i.type !== EntityType.Model)
-          .map(i => ({
-            resourceType: i.type as SearchResultItem["resourceType"],
-            workflow: i.type === "workflow" ? i.workflow : undefined,
-            project: i.type === "project" ? i.project : undefined,
-          })),
+        results: searchTestEntries(keywords, params, this.testEntries, type).map(i => ({
+          resourceType: i.type as SearchResultItem["resourceType"],
+          workflow: i.type === "workflow" ? i.workflow : undefined,
+          project: i.type === "project" ? i.project : undefined,
+          model: i.type === "model" ? i.model : undefined,
+        })),
         more: false,
       });
     });
@@ -83,7 +82,7 @@ export class StubSearchService {
     params: SearchFilterParameters,
     start: number,
     count: number,
-    type: "workflow" | "project" | "dataset" | "file" | null,
+    type: "workflow" | "project" | "dataset" | "file" | "model" | null,
     orderBy: SortMethod,
     isLogin: boolean,
     includePublic: boolean
@@ -100,6 +99,7 @@ export class StubSearchService {
               if (i.workflow && e.type === "workflow" && e.workflow === i.workflow) return true;
               if (i.project && e.type === "project" && e.project === i.project) return true;
               if (i.dataset && e.type === "dataset" && e.dataset === i.dataset) return true;
+              if (i.model && e.type === "model" && e.model === i.model) return true;
               return false;
             })!
         );

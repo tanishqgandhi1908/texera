@@ -27,8 +27,10 @@ import { DashboardEntry } from "../../../dashboard/type/dashboard-entry";
 import { AppSettings } from "../../../common/app-setting";
 import {
   HUB_DATASET_RESULT_DETAIL,
+  HUB_MODEL_RESULT_DETAIL,
   HUB_WORKFLOW_RESULT_DETAIL,
   USER_DATASET,
+  USER_MODEL,
   USER_WORKSPACE,
 } from "../../../app-routing.constant";
 
@@ -83,6 +85,20 @@ describe("BrowseSectionComponent", () => {
       component.ngOnInit();
       expect(component.entityRoutes[201]).toEqual([HUB_DATASET_RESULT_DETAIL, "201"]);
     });
+
+    it("routes owned models to the user model page", () => {
+      component.currentUid = 1;
+      component.entities = [{ id: 300, type: "model", accessibleUserIds: [1] } as unknown as DashboardEntry];
+      component.ngOnInit();
+      expect(component.entityRoutes[300]).toEqual([USER_MODEL, "300"]);
+    });
+
+    it("routes non-owned models to the hub model detail page", () => {
+      component.currentUid = 1;
+      component.entities = [{ id: 301, type: "model", accessibleUserIds: [2] } as unknown as DashboardEntry];
+      component.ngOnInit();
+      expect(component.entityRoutes[301]).toEqual([HUB_MODEL_RESULT_DETAIL, "301"]);
+    });
   });
 
   describe("initializeEntry edge cases", () => {
@@ -110,6 +126,19 @@ describe("BrowseSectionComponent", () => {
       component.ngOnInit();
 
       expect(component.getCoverImage(entity)).toBe(`${AppSettings.getApiEndpoint()}/dataset/5/cover`);
+    });
+
+    it("builds the cover URL against the model endpoint for a model entity", () => {
+      const entity = {
+        id: 9,
+        type: "model",
+        coverImageUrl: "has-cover",
+        accessibleUserIds: [],
+      } as unknown as DashboardEntry;
+      component.entities = [entity];
+      component.ngOnInit();
+
+      expect(component.getCoverImage(entity)).toBe(`${AppSettings.getApiEndpoint()}/model/9/cover`);
     });
 
     it("falls back to the default background when no cover was cached", () => {

@@ -49,6 +49,12 @@ spec:
         - path:
             type: PathPrefix
             value: /api/access/dataset
+        - path:
+            type: PathPrefix
+            value: /api/model
+        - path:
+            type: PathPrefix
+            value: /api/access/model
       backendRefs:
         - name: file-service-svc
           port: 9092

@@ -76,6 +76,25 @@
             {{ modelFormat }}
           </nz-tag>
 
+          <nz-tag class="status-tag">
+            <i
+              nz-icon
+              nzType="eye"
+              nzTheme="outline"></i>
+            {{ formatCount(viewCount) }}
+          </nz-tag>
+
+          <nz-tag
+            class="status-tag like-tag"
+            [ngClass]="{ liked: isLiked, disabled: !isLogin }"
+            (click)="isLogin && toggleLike()">
+            <i
+              nz-icon
+              nzType="like"
+              nzTheme="outline"></i>
+            {{ formatCount(likeCount) }}
+          </nz-tag>
+
           <button
             *ngIf="userHasWriteAccess()"
             nz-button
@@ -118,6 +137,11 @@
           </ng-template>
         </div>
       </div>
+      <img
+        *ngIf="coverImageUrl"
+        class="model-cover-image"
+        [src]="coverImageUrl"
+        alt="Model cover" />
     </div>
 
     <div class="description-section">
@@ -319,7 +343,8 @@
             [fileTreeNodes]="fileTreeNodeList"
             [isTreeNodeDeletable]="userHasWriteAccess()"
             (selectedTreeNode)="onVersionFileTreeNodeSelected($event)"
-            (deletedTreeNode)="onPreviouslyUploadedFileDeleted($event)">
+            (deletedTreeNode)="onPreviouslyUploadedFileDeleted($event)"
+            (setCoverImage)="onSetCoverImage($event)">
           </texera-user-dataset-version-filetree>
         </nz-collapse-panel>
       </nz-collapse>

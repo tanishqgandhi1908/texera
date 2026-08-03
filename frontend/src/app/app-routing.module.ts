@@ -94,6 +94,20 @@ routes.push({
             },
           ],
         },
+        {
+          path: "model",
+          children: [
+            {
+              path: "result",
+              component: HubSearchResultComponent,
+            },
+            {
+              // ModelDetailComponent reads params["mid"], so the segment name matters.
+              path: "result/detail/:mid",
+              component: ModelDetailComponent,
+            },
+          ],
+        },
       ],
     },
     {

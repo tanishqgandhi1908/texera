@@ -24,8 +24,8 @@ import jakarta.ws.rs.core._
 import org.apache.texera.auth.SessionUser
 import org.apache.texera.dao.MockTexeraDB
 import org.apache.texera.dao.jooq.generated.enums.UserRoleEnum
-import org.apache.texera.dao.jooq.generated.tables.daos.UserDao
-import org.apache.texera.dao.jooq.generated.tables.pojos.User
+import org.apache.texera.dao.jooq.generated.tables.daos.{DatasetDao, UserDao}
+import org.apache.texera.dao.jooq.generated.tables.pojos.{Dataset, User}
 import org.apache.texera.service.MockLakeFS
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -35,11 +35,11 @@ import java.io.{ByteArrayInputStream, ByteArrayOutputStream}
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.zip.ZipInputStream
-import java.util.{Collections, Date, Locale}
+import java.util.{Collections, Date, Locale, Optional}
 import scala.util.Random
 
 // Covers the model download surface: presigned single-file URLs (which
-// ModelFileDocument also depends on) and the version zip.
+// ModelFileDocument also depends on), the version zip, and the cover-image read path.
 class ModelDownloadResourceSpec
     extends AnyFlatSpec
     with Matchers
@@ -363,5 +363,176 @@ class ModelDownloadResourceSpec
     modelResource
       .getModelVersionZip(model.model.getMid, null, java.lang.Boolean.TRUE, sessionUser)
       .getStatus shouldEqual 200
+  }
+
+  // ===========================================================================
+  // Cover image
+  // ===========================================================================
+
+  private lazy val accessResource = new ModelAccessResource()
+
+  private def grantRead(mid: Integer): Unit =
+    accessResource
+      .grantAccess(mid, strangerUser.getEmail, "READ", sessionUser)
+      .getStatus shouldEqual 200
+
+  /** Creates a model with a committed image, returning it and the cover path under the version. */
+  private def modelWithCover(
+      isPublic: Boolean = false,
+      isDownloadable: Boolean = true,
+      bytes: Array[Byte] = Array.tabulate[Byte](64)(i => (i % 251).toByte)
+  ): (ModelResource.DashboardModel, String) = {
+    val model = newModel(isPublic, isDownloadable)
+    upload(model.model.getMid, "cover.jpg", bytes)
+    // createModelVersion derives the stored name (e.g. "v1 - v"), which is the
+    // path segment FileResolver matches on — never hardcode it.
+    val version = modelResource.createModelVersion("v", model.model.getMid, sessionUser)
+    (model, s"${version.modelVersion.getName}/cover.jpg")
+  }
+
+  private def setCover(mid: Integer, path: String, user: SessionUser = sessionUser): Response =
+    modelResource.updateModelCoverImage(mid, ModelResource.CoverImageRequest(path), user)
+
+  private def anonymous: Optional[SessionUser] = Optional.empty[SessionUser]()
+  private def as(u: SessionUser): Optional[SessionUser] = Optional.of(u)
+
+  "updateModelCoverImage" should "persist the normalized cover path" in {
+    val (model, coverPath) = modelWithCover()
+
+    setCover(model.model.getMid, coverPath).getStatus shouldEqual 200
+
+    modelResource
+      .getModel(model.model.getMid, sessionUser)
+      .model
+      .getCoverImage shouldEqual coverPath
+  }
+
+  it should "resolve against the model, not a dataset of the same owner and name" in {
+    // Guards the resource-prefix trap: building the logical path with
+    // ResourceType.Datasets compiles fine and silently reads the wrong table.
+    val (model, coverPath) = modelWithCover()
+    val dataset = new Dataset
+    dataset.setOwnerUid(ownerUser.getUid)
+    dataset.setName(model.model.getName)
+    dataset.setDescription("same name as the model, different resource")
+    dataset.setRepositoryName(s"dataset-shadow-${model.model.getMid}")
+    dataset.setIsPublic(true)
+    dataset.setIsDownloadable(true)
+    new DatasetDao(getDSLContext.configuration()).insert(dataset)
+
+    setCover(model.model.getMid, coverPath).getStatus shouldEqual 200
+    modelResource.getModelCover(model.model.getMid, as(sessionUser)).getStatus shouldEqual 307
+  }
+
+  it should "reject a caller with no access" in {
+    val (model, coverPath) = modelWithCover()
+    assertThrows[ForbiddenException] { setCover(model.model.getMid, coverPath, strangerSession) }
+  }
+
+  it should "reject a READ-only grantee" in {
+    val (model, coverPath) = modelWithCover()
+    grantRead(model.model.getMid)
+    assertThrows[ForbiddenException] { setCover(model.model.getMid, coverPath, strangerSession) }
+  }
+
+  it should "reject a traversal path" in {
+    val (model, _) = modelWithCover()
+    assertThrows[BadRequestException] { setCover(model.model.getMid, "../../escape.jpg") }
+  }
+
+  it should "reject a non-image extension" in {
+    val (model, coverPath) = modelWithCover()
+    assertThrows[BadRequestException] {
+      setCover(model.model.getMid, coverPath.replace(".jpg", ".js"))
+    }
+  }
+
+  it should "reject an empty and a null path" in {
+    val (model, _) = modelWithCover()
+    assertThrows[BadRequestException] { setCover(model.model.getMid, "") }
+    assertThrows[BadRequestException] { setCover(model.model.getMid, null) }
+  }
+
+  it should "404 for a model that does not exist" in {
+    assertThrows[NotFoundException] { setCover(Integer.valueOf(987654), "v/cover.jpg") }
+  }
+
+  it should "surface a path that was never committed as a NotFoundException" in {
+    val (model, coverPath) = modelWithCover()
+    val missing = coverPath.replace("cover.jpg", "never-committed.jpg")
+    assertThrows[NotFoundException] { setCover(model.model.getMid, missing) }
+  }
+
+  "getModelCover" should "redirect anonymously to a presigned URL serving the image bytes" in {
+    val bytes = Array.tabulate[Byte](64)(i => (i % 251).toByte)
+    val (model, coverPath) = modelWithCover(isPublic = true, bytes = bytes)
+    setCover(model.model.getMid, coverPath)
+
+    val response = modelResource.getModelCover(model.model.getMid, anonymous)
+    response.getStatus shouldEqual 307
+    fetch(response.getLocation.toString) shouldEqual bytes
+  }
+
+  it should "refuse an anonymous caller on a private model" in {
+    val (model, coverPath) = modelWithCover(isPublic = false)
+    setCover(model.model.getMid, coverPath)
+    assertThrows[ForbiddenException] { modelResource.getModelCover(model.model.getMid, anonymous) }
+  }
+
+  it should "refuse an authenticated stranger on a private model" in {
+    val (model, coverPath) = modelWithCover(isPublic = false)
+    setCover(model.model.getMid, coverPath)
+    assertThrows[ForbiddenException] {
+      modelResource.getModelCover(model.model.getMid, as(strangerSession))
+    }
+  }
+
+  it should "allow a READ grantee on a private model" in {
+    val (model, coverPath) = modelWithCover(isPublic = false)
+    setCover(model.model.getMid, coverPath)
+    grantRead(model.model.getMid)
+
+    modelResource
+      .getModelCover(model.model.getMid, as(strangerSession))
+      .getStatus shouldEqual 307
+  }
+
+  it should "serve the cover of a public model even when downloads are disabled" in {
+    // Deliberate parity with datasets: a cover is display metadata the owner
+    // designated, not model weights, so is_downloadable does not gate it.
+    val (model, coverPath) = modelWithCover(isPublic = true, isDownloadable = false)
+    setCover(model.model.getMid, coverPath)
+
+    modelResource.getModelCover(model.model.getMid, anonymous).getStatus shouldEqual 307
+  }
+
+  it should "404 when no cover image has been set" in {
+    val (model, _) = modelWithCover(isPublic = true)
+    assertThrows[NotFoundException] { modelResource.getModelCover(model.model.getMid, anonymous) }
+  }
+
+  "getModelCoverUrl" should "return a url for the owner of a private model" in {
+    val (model, coverPath) = modelWithCover(isPublic = false)
+    setCover(model.model.getMid, coverPath)
+
+    val response = modelResource.getModelCoverUrl(model.model.getMid, as(sessionUser))
+    response.getStatus shouldEqual 200
+    response.getEntity.asInstanceOf[Map[String, String]]("url") should not be null
+  }
+
+  it should "refuse a stranger on a private model" in {
+    val (model, coverPath) = modelWithCover(isPublic = false)
+    setCover(model.model.getMid, coverPath)
+    assertThrows[ForbiddenException] {
+      modelResource.getModelCoverUrl(model.model.getMid, as(strangerSession))
+    }
+  }
+
+  it should "return a null url with 200, not 404, when no cover is set" in {
+    val (model, _) = modelWithCover(isPublic = true)
+
+    val response = modelResource.getModelCoverUrl(model.model.getMid, anonymous)
+    response.getStatus shouldEqual 200
+    response.getEntity.asInstanceOf[Map[String, String]]("url") shouldEqual null
   }
 }

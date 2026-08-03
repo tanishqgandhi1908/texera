@@ -48,7 +48,7 @@ import org.apache.texera.dao.jooq.generated.tables.records.ModelUploadSessionRec
 import org.apache.texera.service.`type`.{DatasetFileNode, Diff, ExistingUploadFilesRequest}
 import org.apache.texera.service.resource.ModelAccessResource._
 import org.apache.texera.service.resource.ModelResource.{context, _}
-import org.apache.texera.service.util.PresignedDownloadUtils
+import org.apache.texera.service.util.{CoverImageUtils, PresignedDownloadUtils}
 import org.apache.texera.service.util.ResourceUploadUtils.{
   matchExistingUploads,
   normalizeUploadRequest,
@@ -69,7 +69,7 @@ import org.jooq.{DSLContext, EnumType, Record2, Result}
 import software.amazon.awssdk.services.s3.model.UploadPartResponse
 
 import java.io.{InputStream, OutputStream}
-import java.net.URLDecoder
+import java.net.{URI, URLDecoder}
 import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Paths}
 import java.sql.SQLException
@@ -168,6 +168,9 @@ object ModelResource {
       fileNodes: List[DatasetFileNode],
       size: Long
   )
+
+  /** Path of an already-committed image, relative to the model root, e.g. "v1/cover.jpg". */
+  case class CoverImageRequest(coverImage: String)
 }
 
 @Produces(Array(MediaType.APPLICATION_JSON))
@@ -717,6 +720,21 @@ class ModelResource extends LazyLogging {
   }
 
   @GET
+  @PermitAll
+  @Path("/{mid}/publicVersion/list")
+  def getPublicModelVersionList(
+      @PathParam("mid") mid: Integer
+  ): List[ModelVersion] = {
+    withTransaction(context)(ctx => {
+      val model = getModelByID(ctx, mid)
+      if (!isModelPublic(ctx, model.getMid)) {
+        throw new ForbiddenException(ERR_USER_HAS_NO_ACCESS_TO_MODEL_MESSAGE)
+      }
+      fetchModelVersions(ctx, model.getMid)
+    })
+  }
+
+  @GET
   @RolesAllowed(Array("REGULAR", "ADMIN"))
   @Path("/{mid}/version/latest")
   def retrieveLatestModelVersion(
@@ -746,6 +764,16 @@ class ModelResource extends LazyLogging {
   ): ModelVersionRootFileNodesResponse = {
     val uid = user.getUid
     withTransaction(context)(ctx => fetchModelVersionRootFileNodes(ctx, mid, mvid, Some(uid)))
+  }
+
+  @GET
+  @PermitAll
+  @Path("/{mid}/publicVersion/{mvid}/rootFileNodes")
+  def retrievePublicModelVersionRootFileNodes(
+      @PathParam("mid") mid: Integer,
+      @PathParam("mvid") mvid: Integer
+  ): ModelVersionRootFileNodesResponse = {
+    withTransaction(context)(ctx => fetchModelVersionRootFileNodes(ctx, mid, mvid, None))
   }
 
   // ===========================================================================
@@ -1377,8 +1405,123 @@ class ModelResource extends LazyLogging {
   }
 
   // ===========================================================================
+  // Cover image
+  // ===========================================================================
+
+  @POST
+  @RolesAllowed(Array("REGULAR", "ADMIN"))
+  @Path("/{mid}/update/cover")
+  @Consumes(Array(MediaType.APPLICATION_JSON))
+  def updateModelCoverImage(
+      @PathParam("mid") mid: Integer,
+      request: CoverImageRequest,
+      @Auth sessionUser: SessionUser
+  ): Response = {
+    withTransaction(context) { ctx =>
+      val model = getModelByID(ctx, mid)
+      if (!userHasWriteAccess(ctx, mid, sessionUser.getUid)) {
+        throw new ForbiddenException(ERR_USER_HAS_NO_ACCESS_TO_MODEL_MESSAGE)
+      }
+
+      val normalized =
+        CoverImageUtils.validatePathOrThrow(request.coverImage, CoverImageUtils.MAX_PATH_LENGTH)
+
+      val document = CoverImageUtils.openCover(
+        ResourceType.Models,
+        getOwner(ctx, mid).getEmail,
+        model.getName,
+        normalized
+      )
+      CoverImageUtils.requireWithinSizeLimit(
+        CoverImageUtils.fileSizeOf(document, normalized),
+        normalized
+      )
+
+      model.setCoverImage(normalized)
+      new ModelDao(ctx.configuration()).update(model)
+      Response.ok(Map("coverImage" -> normalized)).build()
+    }
+  }
+
+  /**
+    * Get the cover image for a model.
+    * Returns a 307 redirect to the presigned S3 URL.
+    */
+  @GET
+  @PermitAll
+  @Path("/{mid}/cover")
+  def getModelCover(
+      @PathParam("mid") mid: Integer,
+      @Auth sessionUser: Optional[SessionUser]
+  ): Response = {
+    withTransaction(context) { ctx =>
+      val model = requireCoverReadAccess(ctx, mid, sessionUser)
+      val coverImage = Option(model.getCoverImage).getOrElse(
+        throw new NotFoundException("No cover image")
+      )
+
+      val document = CoverImageUtils.openCover(
+        ResourceType.Models,
+        getOwner(ctx, mid).getEmail,
+        model.getName,
+        coverImage
+      )
+      Response
+        .temporaryRedirect(new URI(CoverImageUtils.presignedUrl(document, coverImage)))
+        .build()
+    }
+  }
+
+  /**
+    * Get a presigned S3 URL for the model cover image as JSON.
+    * JWT-aware variant of GET /{mid}/cover; required for private models
+    * since `<img src>` cannot attach the Authorization header.
+    */
+  @GET
+  @PermitAll
+  @Path("/{mid}/cover-url")
+  @Produces(Array(MediaType.APPLICATION_JSON))
+  def getModelCoverUrl(
+      @PathParam("mid") mid: Integer,
+      @Auth sessionUser: Optional[SessionUser]
+  ): Response = {
+    withTransaction(context) { ctx =>
+      val model = requireCoverReadAccess(ctx, mid, sessionUser)
+
+      Option(model.getCoverImage) match {
+        case None => Response.ok(Map("url" -> null)).build()
+        case Some(coverImage) =>
+          val document = CoverImageUtils.openCover(
+            ResourceType.Models,
+            getOwner(ctx, mid).getEmail,
+            model.getName,
+            coverImage
+          )
+          Response.ok(Map("url" -> CoverImageUtils.presignedUrl(document, coverImage))).build()
+      }
+    }
+  }
+
+  // ===========================================================================
   // Private helpers
   // ===========================================================================
+
+  /** A cover is readable by anyone for a public model, and by read-grantees otherwise. */
+  private def requireCoverReadAccess(
+      ctx: DSLContext,
+      mid: Integer,
+      sessionUser: Optional[SessionUser]
+  ): Model = {
+    val model = getModelByID(ctx, mid)
+    val requesterUid = if (sessionUser.isPresent) Some(sessionUser.get().getUid) else None
+
+    if (requesterUid.isEmpty && !model.getIsPublic) {
+      throw new ForbiddenException(ERR_USER_HAS_NO_ACCESS_TO_MODEL_MESSAGE)
+    } else if (requesterUid.exists(uid => !userHasReadAccess(ctx, mid, uid))) {
+      throw new ForbiddenException(ERR_USER_HAS_NO_ACCESS_TO_MODEL_MESSAGE)
+    }
+    model
+  }
 
   /** Size of a model's LakeFS repository, or 0 if LakeFS cannot answer. */
   private def repositorySizeOrZero(model: Model): Long = {

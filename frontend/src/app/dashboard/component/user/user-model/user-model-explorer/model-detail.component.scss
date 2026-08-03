@@ -16,7 +16,6 @@
  * limitations under the License.
  */
 
-
 .version-storage {
   padding: 0 15px;
   margin-bottom: 25px;
@@ -228,4 +227,28 @@ nz-select {
 
 .model-header-meta {
   flex: 1;
+}
+
+.model-cover-image {
+  width: 280px;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 8px;
+  margin-right: 80px;
+}
+
+.like-tag {
+  cursor: pointer;
+}
+
+.like-tag.liked {
+  i {
+    color: #ef4444;
+    background: #fef2f2;
+  }
+}
+
+.like-tag.disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }

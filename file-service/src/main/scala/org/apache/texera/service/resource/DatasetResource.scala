@@ -50,7 +50,7 @@ import org.apache.texera.dao.jooq.generated.tables.pojos.{
 import org.apache.texera.service.`type`.{DatasetFileNode, Diff, ExistingUploadFilesRequest}
 import org.apache.texera.service.resource.DatasetAccessResource._
 import org.apache.texera.service.resource.DatasetResource.{context, _}
-import org.apache.texera.service.util.PresignedDownloadUtils
+import org.apache.texera.service.util.{CoverImageUtils, PresignedDownloadUtils}
 import org.apache.texera.service.util.ResourceUploadUtils.{
   matchExistingUploads,
   normalizeUploadRequest,
@@ -81,7 +81,6 @@ import org.apache.texera.dao.jooq.generated.tables.DatasetUploadSession.DATASET_
 import org.apache.texera.dao.jooq.generated.tables.DatasetUploadSessionPart.DATASET_UPLOAD_SESSION_PART
 import org.jooq.exception.DataAccessException
 import software.amazon.awssdk.services.s3.model.UploadPartResponse
-import org.apache.commons.io.FilenameUtils
 import org.apache.texera.service.util.LakeFSExceptionHandler.withLakeFSErrorHandling
 import org.apache.texera.dao.jooq.generated.tables.records.DatasetUploadSessionRecord
 
@@ -181,8 +180,8 @@ class DatasetResource extends LazyLogging {
   private val ERR_DATASET_VERSION_NOT_FOUND_MESSAGE = "The version of the dataset not found"
   private val EXPIRATION_MINUTES = 5
 
-  private val COVER_IMAGE_SIZE_LIMIT_BYTES: Long = 10 * 1024 * 1024 // 10 MB
-  private val ALLOWED_IMAGE_EXTENSIONS: Set[String] = Set(".jpg", ".jpeg", ".png", ".gif", ".webp")
+  // Deployed dataset DBs may still have cover_image as varchar(246); see sql/updates/18.sql.
+  private val COVER_IMAGE_MAX_PATH_LENGTH = 246
 
   /**
     * Helper function to get the dataset from DB with additional information including user access privilege and owner email
@@ -2152,39 +2151,21 @@ class DatasetResource extends LazyLogging {
         throw new ForbiddenException(ERR_USER_HAS_NO_ACCESS_TO_DATASET_MESSAGE)
       }
 
-      if (request.coverImage == null || request.coverImage.trim.isEmpty) {
-        throw new BadRequestException("Cover image path is required")
-      }
-
-      val normalized = validateAndNormalizeFilePathOrThrow(request.coverImage)
-
-      val extension = FilenameUtils.getExtension(normalized)
-      if (extension == null || !ALLOWED_IMAGE_EXTENSIONS.contains(s".$extension".toLowerCase)) {
-        throw new BadRequestException("Invalid file type")
-      }
+      val normalized =
+        CoverImageUtils.validatePathOrThrow(request.coverImage, COVER_IMAGE_MAX_PATH_LENGTH)
 
       val owner = getOwner(ctx, did)
-      val document = DocumentFactory
-        .openReadonlyDocument(
-          FileResolver.resolve(
-            s"${ResourceType.Datasets}/${owner.getEmail}/${dataset.getName}/$normalized"
-          )
+      val document =
+        CoverImageUtils.openCover(
+          ResourceType.Datasets,
+          owner.getEmail,
+          dataset.getName,
+          normalized
         )
-        .asInstanceOf[OnVersionedFileResource]
-
-      val fileSize = withLakeFSErrorHandling(s"reading the size of cover image '$normalized'") {
-        LakeFSStorageClient.getFileSize(
-          document.getRepositoryName(),
-          document.getVersionHash(),
-          document.getFileRelativePath()
-        )
-      }
-
-      if (fileSize > COVER_IMAGE_SIZE_LIMIT_BYTES) {
-        throw new BadRequestException(
-          s"Cover image must be less than ${COVER_IMAGE_SIZE_LIMIT_BYTES / (1024 * 1024)} MB"
-        )
-      }
+      CoverImageUtils.requireWithinSizeLimit(
+        CoverImageUtils.fileSizeOf(document, normalized),
+        normalized
+      )
 
       dataset.setCoverImage(normalized)
       new DatasetDao(ctx.configuration()).update(dataset)
@@ -2222,24 +2203,17 @@ class DatasetResource extends LazyLogging {
       )
 
       val owner = getOwner(ctx, did)
-      val fullPath =
-        s"${ResourceType.Datasets}/${owner.getEmail}/${dataset.getName}/$coverImage"
-
-      val document = DocumentFactory
-        .openReadonlyDocument(FileResolver.resolve(fullPath))
-        .asInstanceOf[OnVersionedFileResource]
-
-      val presignedUrl = withLakeFSErrorHandling(
-        s"generating a presigned URL for cover image '$coverImage'"
-      ) {
-        LakeFSStorageClient.getFilePresignedUrl(
-          document.getRepositoryName(),
-          document.getVersionHash(),
-          document.getFileRelativePath()
+      val document =
+        CoverImageUtils.openCover(
+          ResourceType.Datasets,
+          owner.getEmail,
+          dataset.getName,
+          coverImage
         )
-      }
 
-      Response.temporaryRedirect(new URI(presignedUrl)).build()
+      Response
+        .temporaryRedirect(new URI(CoverImageUtils.presignedUrl(document, coverImage)))
+        .build()
     }
   }
 
@@ -2272,24 +2246,14 @@ class DatasetResource extends LazyLogging {
           Response.ok(Map("url" -> null)).build()
         case Some(coverImage) =>
           val owner = getOwner(ctx, did)
-          val fullPath =
-            s"${ResourceType.Datasets}/${owner.getEmail}/${dataset.getName}/$coverImage"
-
-          val document = DocumentFactory
-            .openReadonlyDocument(FileResolver.resolve(fullPath))
-            .asInstanceOf[OnVersionedFileResource]
-
-          val presignedUrl = withLakeFSErrorHandling(
-            s"generating a presigned URL for cover image '$coverImage'"
-          ) {
-            LakeFSStorageClient.getFilePresignedUrl(
-              document.getRepositoryName(),
-              document.getVersionHash(),
-              document.getFileRelativePath()
+          val document =
+            CoverImageUtils.openCover(
+              ResourceType.Datasets,
+              owner.getEmail,
+              dataset.getName,
+              coverImage
             )
-          }
-
-          Response.ok(Map("url" -> presignedUrl)).build()
+          Response.ok(Map("url" -> CoverImageUtils.presignedUrl(document, coverImage))).build()
       }
     }
   }

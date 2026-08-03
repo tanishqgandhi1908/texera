@@ -24,8 +24,10 @@ import { DatasetService } from "../../../dashboard/service/user/dataset/dataset.
 import { UntilDestroy } from "@ngneat/until-destroy";
 import {
   HUB_DATASET_RESULT_DETAIL,
+  HUB_MODEL_RESULT_DETAIL,
   HUB_WORKFLOW_RESULT_DETAIL,
   USER_DATASET,
+  USER_MODEL,
   USER_WORKSPACE,
 } from "../../../app-routing.constant";
 import { AppSettings } from "../../../common/app-setting";
@@ -63,6 +65,8 @@ export class BrowseSectionComponent implements OnInit, OnChanges {
   protected readonly USER_WORKSPACE = USER_WORKSPACE;
   protected readonly HUB_DATASET_RESULT_DETAIL = HUB_DATASET_RESULT_DETAIL;
   protected readonly USER_DATASET = USER_DATASET;
+  protected readonly HUB_MODEL_RESULT_DETAIL = HUB_MODEL_RESULT_DETAIL;
+  protected readonly USER_MODEL = USER_MODEL;
   entityRoutes: { [key: number]: string[] } = {};
 
   private coverImageUrls = new Map<number, string>();
@@ -107,6 +111,12 @@ export class BrowseSectionComponent implements OnInit, OnChanges {
       } else {
         this.entityRoutes[entityId] = [this.HUB_DATASET_RESULT_DETAIL, String(entityId)];
       }
+    } else if (entity.type === "model") {
+      if (this.currentUid !== undefined && owners.includes(this.currentUid)) {
+        this.entityRoutes[entityId] = [this.USER_MODEL, String(entityId)];
+      } else {
+        this.entityRoutes[entityId] = [this.HUB_MODEL_RESULT_DETAIL, String(entityId)];
+      }
     } else {
       throw new Error("Unexpected type in DashboardEntry.");
     }
@@ -118,13 +128,13 @@ export class BrowseSectionComponent implements OnInit, OnChanges {
     this.entities
       .filter(
         (entity): entity is DashboardEntry & { id: number } =>
-          entity.type === "dataset" &&
+          (entity.type === "dataset" || entity.type === "model") &&
           entity.coverImageUrl !== undefined &&
           entity.id !== undefined &&
           !this.coverImageUrls.has(entity.id)
       )
       .forEach(entity => {
-        const coverUrl = `${AppSettings.getApiEndpoint()}/dataset/${entity.id}/cover`;
+        const coverUrl = `${AppSettings.getApiEndpoint()}/${entity.type}/${entity.id}/cover`;
         this.coverImageUrls.set(entity.id, coverUrl);
       });
   }

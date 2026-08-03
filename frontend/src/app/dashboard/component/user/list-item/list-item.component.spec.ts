@@ -32,9 +32,11 @@ import { commonTestProviders } from "../../../../common/testing/test-utils";
 import type { Mocked } from "vitest";
 import { DashboardEntry } from "src/app/dashboard/type/dashboard-entry";
 import { DatasetService } from "../../../service/user/dataset/dataset.service";
+import { DownloadService } from "../../../service/user/download/download.service";
 import { NotificationService } from "../../../../common/service/notification/notification.service";
 import {
   HUB_DATASET_RESULT_DETAIL,
+  HUB_MODEL_RESULT_DETAIL,
   HUB_WORKFLOW_RESULT_DETAIL,
   USER_DATASET,
   USER_MODEL,
@@ -201,19 +203,32 @@ describe("ListItemComponent", () => {
       expect(component.entryLink).toEqual([HUB_DATASET_RESULT_DETAIL, "301"]);
     });
 
-    it("routes models to the user model page even when accessibleUserIds is empty", () => {
+    it("routes accessible models to the user model page", () => {
       component.currentUid = 1;
       component.entry = {
         id: 400,
         type: "model",
         model: { isOwner: true },
-        accessibleUserIds: [],
+        accessibleUserIds: [1],
         ...baseStats,
       } as unknown as DashboardEntry;
       component.initializeEntry();
       expect(component.entryLink).toEqual([USER_MODEL, "400"]);
       expect(component.iconType).toBe("experiment");
       expect(component.disableDelete).toBe(false);
+    });
+
+    it("routes non-accessible models to the hub model detail page", () => {
+      component.currentUid = 1;
+      component.entry = {
+        id: 401,
+        type: "model",
+        model: { isOwner: false },
+        accessibleUserIds: [999],
+        ...baseStats,
+      } as unknown as DashboardEntry;
+      component.initializeEntry();
+      expect(component.entryLink).toEqual([HUB_MODEL_RESULT_DETAIL, "401"]);
     });
 
     it("disables delete for a model the user does not own", () => {
@@ -438,6 +453,79 @@ describe("ListItemComponent", () => {
       expect(modalService.create).toHaveBeenCalled();
       expect(hubService.getCounts).toHaveBeenCalledWith(["workflow"], [9], [ActionType.View]);
       expect(component.viewCount).toBe(5); // 4 + 1
+    });
+  });
+
+  describe("onClickDownload", () => {
+    let downloadService: DownloadService;
+
+    beforeEach(() => {
+      downloadService = TestBed.inject(DownloadService);
+    });
+
+    it("downloads a workflow via the download service", () => {
+      const spy = vi.spyOn(downloadService, "downloadWorkflow").mockReturnValue(of({} as any));
+      component.entry = { id: 7, type: "workflow", workflow: { workflow: { name: "myflow" } } } as DashboardEntry;
+
+      component.onClickDownload();
+
+      expect(spy).toHaveBeenCalledWith(7, "myflow");
+    });
+
+    it("downloads a dataset via the download service", () => {
+      const spy = vi.spyOn(downloadService, "downloadDataset").mockReturnValue(of(new Blob()));
+      component.entry = { id: 5, name: "mydataset", type: "dataset" } as unknown as DashboardEntry;
+
+      component.onClickDownload();
+
+      expect(spy).toHaveBeenCalledWith(5, "mydataset");
+    });
+
+    it("downloads a model via the download service", () => {
+      const spy = vi.spyOn(downloadService, "downloadModel").mockReturnValue(of(new Blob()));
+      component.entry = { id: 9, name: "my-model", type: "model" } as unknown as DashboardEntry;
+
+      component.onClickDownload();
+
+      expect(spy).toHaveBeenCalledWith(9, "my-model");
+    });
+
+    it("is a no-op when the entry has no id", () => {
+      const modelSpy = vi.spyOn(downloadService, "downloadModel");
+      component.entry = { id: undefined, name: "my-model", type: "model" } as unknown as DashboardEntry;
+
+      component.onClickDownload();
+
+      expect(modelSpy).not.toHaveBeenCalled();
+    });
+
+    it("is a no-op for a project entry", () => {
+      const workflowSpy = vi.spyOn(downloadService, "downloadWorkflow");
+      const datasetSpy = vi.spyOn(downloadService, "downloadDataset");
+      const modelSpy = vi.spyOn(downloadService, "downloadModel");
+      component.entry = { id: 3, name: "proj", type: "project" } as unknown as DashboardEntry;
+
+      component.onClickDownload();
+
+      expect(workflowSpy).not.toHaveBeenCalled();
+      expect(datasetSpy).not.toHaveBeenCalled();
+      expect(modelSpy).not.toHaveBeenCalled();
+    });
+
+    it("renders the download button for a model entry but not for a project entry", () => {
+      component.entry = {
+        id: 9,
+        name: "my-model",
+        type: "model",
+        model: { isOwner: true },
+      } as unknown as DashboardEntry;
+      component.isPrivateSearch = true;
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('button[title="Download"]')).toBeTruthy();
+
+      component.entry = { id: 3, name: "proj", type: "project" } as unknown as DashboardEntry;
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('button[title="Download"]')).toBeNull();
     });
   });
 });

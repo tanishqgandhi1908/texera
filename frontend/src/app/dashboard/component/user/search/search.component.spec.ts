@@ -221,6 +221,23 @@ describe("SearchComponent", () => {
     expect(searchSpy).toHaveBeenCalledTimes(1);
   });
 
+  it("sets the model type and triggers a search on filterByType", () => {
+    const searchSpy = vi.spyOn(component, "search").mockResolvedValue(undefined);
+
+    component.filterByType("model");
+
+    expect(component.selectedType).toBe("model");
+    expect(searchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders a Model filter button alongside the other resource types", () => {
+    fixture.detectChanges();
+    const labels = Array.from(fixture.nativeElement.querySelectorAll(".left-controls button")).map((b: any) =>
+      b.textContent.trim()
+    );
+    expect(labels).toContain("Model");
+  });
+
   it("navigates back on goBack", () => {
     component.goBack();
     expect(locationStub.back).toHaveBeenCalledTimes(1);

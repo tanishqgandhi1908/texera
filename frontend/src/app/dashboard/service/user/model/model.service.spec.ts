@@ -179,9 +179,40 @@ describe("ModelService", () => {
     expect(await pending).toEqual(["a@b.com"]);
   });
 
+  it("updateModelCoverImage posts the relative cover path to the mid-scoped cover endpoint", async () => {
+    const pending = firstValueFrom(service.updateModelCoverImage(9, "v1/cover.png"));
+    const req = httpMock.expectOne(`${API}/${MODEL_BASE_URL}/9/update/cover`);
+    expect(req.request.method).toBe("POST");
+    expect(req.request.body).toEqual({ coverImage: "v1/cover.png" });
+    req.flush({});
+    await pending;
+  });
+
+  it("getModelCoverUrl gets the JWT-aware cover-url variant, not the redirect one", async () => {
+    const pending = firstValueFrom(service.getModelCoverUrl(9));
+    const req = httpMock.expectOne(`${API}/${MODEL_BASE_URL}/9/cover-url`);
+    expect(req.request.method).toBe("GET");
+    req.flush({ url: "https://example/x.png" });
+    expect(await pending).toEqual({ url: "https://example/x.png" });
+  });
+
+  it("getModelCoverUrl surfaces a null url when no cover is set", async () => {
+    const pending = firstValueFrom(service.getModelCoverUrl(9));
+    httpMock.expectOne(`${API}/${MODEL_BASE_URL}/9/cover-url`).flush({ url: null });
+    expect(await pending).toEqual({ url: null });
+  });
+
   it("retrieveModelVersionList gets the mid-scoped version list", async () => {
     const pending = firstValueFrom(service.retrieveModelVersionList(5));
     const req = httpMock.expectOne(`${API}/${MODEL_BASE_URL}/5/version/list`);
+    expect(req.request.method).toBe("GET");
+    req.flush([buildModelVersion()]);
+    expect((await pending).length).toBe(1);
+  });
+
+  it("retrieveModelVersionList uses the public list endpoint when not logged in", async () => {
+    const pending = firstValueFrom(service.retrieveModelVersionList(5, false));
+    const req = httpMock.expectOne(`${API}/${MODEL_BASE_URL}/5/publicVersion/list`);
     expect(req.request.method).toBe("GET");
     req.flush([buildModelVersion()]);
     expect((await pending).length).toBe(1);
@@ -200,6 +231,14 @@ describe("ModelService", () => {
   it("retrieveModelVersionFileTree gets the version's root file nodes and size", async () => {
     const pending = firstValueFrom(service.retrieveModelVersionFileTree(5, 10));
     const req = httpMock.expectOne(`${API}/${MODEL_BASE_URL}/5/version/10/rootFileNodes`);
+    expect(req.request.method).toBe("GET");
+    req.flush({ fileNodes: [buildFileNode("model.pt")], size: 42 });
+    expect(await pending).toEqual({ fileNodes: [buildFileNode("model.pt")], size: 42 });
+  });
+
+  it("retrieveModelVersionFileTree uses the public root file nodes endpoint when not logged in", async () => {
+    const pending = firstValueFrom(service.retrieveModelVersionFileTree(5, 10, false));
+    const req = httpMock.expectOne(`${API}/${MODEL_BASE_URL}/5/publicVersion/10/rootFileNodes`);
     expect(req.request.method).toBe("GET");
     req.flush({ fileNodes: [buildFileNode("model.pt")], size: 42 });
     expect(await pending).toEqual({ fileNodes: [buildFileNode("model.pt")], size: 42 });

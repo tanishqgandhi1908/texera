@@ -20,6 +20,8 @@ import { ComponentFixture, TestBed } from "@angular/core/testing";
 import { ActivatedRoute } from "@angular/router";
 import { MarkdownService } from "ngx-markdown";
 import { NzModalService } from "ng-zorro-antd/modal";
+import { HttpErrorResponse } from "@angular/common/http";
+import { ActionType, EntityType, HubService } from "src/app/hub/service/hub.service";
 import { NEVER, of, Subject, throwError } from "rxjs";
 
 import { ModelDetailComponent } from "./model-detail.component";
@@ -99,12 +101,21 @@ describe("ModelDetailComponent", () => {
     createModelVersion: ReturnType<typeof vi.fn>;
     multipartUpload: ReturnType<typeof vi.fn>;
     finalizeMultipartUpload: ReturnType<typeof vi.fn>;
+    updateModelCoverImage: ReturnType<typeof vi.fn>;
+    getModelCoverUrl: ReturnType<typeof vi.fn>;
   };
   let downloadService: {
     downloadModelVersion: ReturnType<typeof vi.fn>;
     downloadModelSingleFile: ReturnType<typeof vi.fn>;
   };
   let notificationService: { success: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
+  let hubService: {
+    getCounts: ReturnType<typeof vi.fn>;
+    postView: ReturnType<typeof vi.fn>;
+    isLiked: ReturnType<typeof vi.fn>;
+    postLike: ReturnType<typeof vi.fn>;
+    postUnlike: ReturnType<typeof vi.fn>;
+  };
 
   beforeEach(async () => {
     modelService = {
@@ -120,12 +131,21 @@ describe("ModelDetailComponent", () => {
       createModelVersion: vi.fn().mockReturnValue(of(makeVersion({ mvid: 11, name: "v2" }))),
       multipartUpload: vi.fn().mockReturnValue(NEVER),
       finalizeMultipartUpload: vi.fn().mockReturnValue(of({})),
+      updateModelCoverImage: vi.fn().mockReturnValue(of({})),
+      getModelCoverUrl: vi.fn().mockReturnValue(of({ url: "https://example/cover.png" })),
     };
     downloadService = {
       downloadModelVersion: vi.fn().mockReturnValue(of(new Blob())),
       downloadModelSingleFile: vi.fn().mockReturnValue(of(new Blob())),
     };
     notificationService = { success: vi.fn(), error: vi.fn() };
+    hubService = {
+      getCounts: vi.fn().mockReturnValue(of([{ counts: { like: 4 } }])),
+      postView: vi.fn().mockReturnValue(of(7)),
+      isLiked: vi.fn().mockReturnValue(of([{ isLiked: true }])),
+      postLike: vi.fn().mockReturnValue(of(true)),
+      postUnlike: vi.fn().mockReturnValue(of(true)),
+    };
 
     TestBed.configureTestingModule({
       imports: [ModelDetailComponent, ...commonTestImports],
@@ -133,6 +153,7 @@ describe("ModelDetailComponent", () => {
         { provide: ModelService, useValue: modelService },
         { provide: DownloadService, useValue: downloadService },
         { provide: NotificationService, useValue: notificationService },
+        { provide: HubService, useValue: hubService },
         { provide: UserService, useClass: StubUserService },
         { provide: ActivatedRoute, useValue: { params: of({ mid: "5" }), data: of({}) } },
         { provide: MarkdownService, useValue: { parse: vi.fn(() => "") } },
@@ -153,7 +174,7 @@ describe("ModelDetailComponent", () => {
       // params["mid"] is a string; leaving it uncoerced would make mid === "5".
       expect(component.mid).toBe(5);
       expect(modelService.getModel).toHaveBeenCalledWith(5, true);
-      expect(modelService.retrieveModelVersionList).toHaveBeenCalledWith(5);
+      expect(modelService.retrieveModelVersionList).toHaveBeenCalledWith(5, true);
     });
 
     it("populates the header fields, including the model-only framework and format", () => {
@@ -174,7 +195,7 @@ describe("ModelDetailComponent", () => {
       fixture.detectChanges();
 
       expect(component.selectedVersion?.name).toBe("v1");
-      expect(modelService.retrieveModelVersionFileTree).toHaveBeenCalledWith(5, 10);
+      expect(modelService.retrieveModelVersionFileTree).toHaveBeenCalledWith(5, 10, true);
       expect(component.currentModelVersionSize).toBe(2048);
       expect(component.selectedVersionCreationTime).not.toBe("");
     });
@@ -495,7 +516,7 @@ describe("ModelDetailComponent", () => {
       expect(modelService.createModelVersion).toHaveBeenCalledWith(5, "v2");
       expect(component.versionName).toBe("");
       expect(component.pendingChangesCount).toBe(0);
-      expect(modelService.retrieveModelVersionList).toHaveBeenCalledWith(5);
+      expect(modelService.retrieveModelVersionList).toHaveBeenCalledWith(5, true);
       expect(component.isCreatingVersion).toBe(false);
     });
 
@@ -517,6 +538,115 @@ describe("ModelDetailComponent", () => {
 
       expect(notificationService.error).toHaveBeenCalledWith("Version creation failed: nothing staged");
       expect(component.isCreatingVersion).toBe(false);
+    });
+  });
+
+  describe("cover image", () => {
+    it("loads the cover url when the model has a cover image", async () => {
+      modelService.getModel.mockReturnValue(of(makeDashboardModel({ coverImage: "v1/cover.png" })));
+      fixture.detectChanges();
+      await component.retrieveModelInfo();
+
+      expect(modelService.getModelCoverUrl).toHaveBeenCalledWith(5);
+      expect(component.coverImageUrl).toBe("https://example/cover.png");
+    });
+
+    it("leaves the cover url null when the model has no cover image", async () => {
+      fixture.detectChanges();
+      await component.retrieveModelInfo();
+
+      expect(modelService.getModelCoverUrl).not.toHaveBeenCalled();
+      expect(component.coverImageUrl).toBeNull();
+    });
+
+    it("prefixes the selected version name onto the path when setting a cover", () => {
+      fixture.detectChanges();
+      component.onSetCoverImage("cover.png");
+
+      // The backend resolves under /models/<owner>/<name>/<version>/<relative path>.
+      expect(modelService.updateModelCoverImage).toHaveBeenCalledWith(5, "v1/cover.png");
+      expect(notificationService.success).toHaveBeenCalledWith("Cover image updated.");
+    });
+
+    it("refreshes the cover url after a successful update", () => {
+      fixture.detectChanges();
+      modelService.getModelCoverUrl.mockClear();
+
+      component.onSetCoverImage("cover.png");
+
+      expect(modelService.getModelCoverUrl).toHaveBeenCalledWith(5);
+      expect(component.coverImageUrl).toBe("https://example/cover.png");
+    });
+
+    it("is a no-op when no version is selected", () => {
+      modelService.retrieveModelVersionList.mockReturnValue(of([]));
+      fixture.detectChanges();
+
+      component.onSetCoverImage("cover.png");
+
+      expect(modelService.updateModelCoverImage).not.toHaveBeenCalled();
+    });
+
+    it("surfaces the backend message when setting a cover fails", () => {
+      fixture.detectChanges();
+      modelService.updateModelCoverImage.mockReturnValue(
+        throwError(() => new HttpErrorResponse({ error: { message: "Invalid file type" }, status: 400 }))
+      );
+
+      component.onSetCoverImage("cover.js");
+
+      expect(notificationService.error).toHaveBeenCalledWith("Invalid file type");
+    });
+  });
+
+  describe("hub stats", () => {
+    it("records a view on init and shows the returned count", () => {
+      fixture.detectChanges();
+
+      expect(hubService.postView).toHaveBeenCalledWith(5, expect.any(Number), EntityType.Model);
+      expect(component.viewCount).toBe(7);
+    });
+
+    it("loads the like count and liked state on init", () => {
+      fixture.detectChanges();
+
+      expect(hubService.getCounts).toHaveBeenCalledWith([EntityType.Model], [5], [ActionType.Like]);
+      expect(component.likeCount).toBe(4);
+      expect(component.isLiked).toBe(true);
+    });
+
+    it("toggleLike unlikes an already-liked model and refreshes the count", () => {
+      fixture.detectChanges();
+      hubService.getCounts.mockReturnValue(of([{ counts: { like: 3 } }]));
+
+      component.toggleLike();
+
+      expect(hubService.postUnlike).toHaveBeenCalledWith(5, EntityType.Model);
+      expect(component.isLiked).toBe(false);
+      expect(component.likeCount).toBe(3);
+    });
+
+    it("toggleLike likes a model that is not yet liked", () => {
+      hubService.isLiked.mockReturnValue(of([{ isLiked: false }]));
+      fixture.detectChanges();
+      hubService.getCounts.mockReturnValue(of([{ counts: { like: 5 } }]));
+
+      component.toggleLike();
+
+      expect(hubService.postLike).toHaveBeenCalledWith(5, EntityType.Model);
+      expect(component.isLiked).toBe(true);
+      expect(component.likeCount).toBe(5);
+    });
+
+    it("toggleLike does nothing when the like call reports failure", () => {
+      fixture.detectChanges();
+      hubService.postUnlike.mockReturnValue(of(false));
+      const before = component.likeCount;
+
+      component.toggleLike();
+
+      expect(component.isLiked).toBe(true);
+      expect(component.likeCount).toBe(before);
     });
   });
 });

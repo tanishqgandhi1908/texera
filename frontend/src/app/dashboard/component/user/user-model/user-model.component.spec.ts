@@ -17,7 +17,7 @@
  */
 
 import { ComponentFixture, TestBed } from "@angular/core/testing";
-import { of } from "rxjs";
+import { of, throwError } from "rxjs";
 import { UserModelComponent } from "./user-model.component";
 import { ModelService } from "../../../service/user/model/model.service";
 import { UserService } from "../../../../common/service/user/user.service";
@@ -26,6 +26,8 @@ import { DashboardModel } from "../../../type/dashboard-model.interface";
 import { SortMethod } from "../../../type/sort-method";
 import { commonTestImports, commonTestProviders } from "../../../../common/testing/test-utils";
 import { NzModalService } from "ng-zorro-antd/modal";
+import { ActionType, EntityType, HubService } from "../../../../hub/service/hub.service";
+import { SearchService } from "../../../service/user/search.service";
 import { provideRouter, Router } from "@angular/router";
 import { UserModelCreatorComponent } from "./user-model-creator/user-model-creator.component";
 import { USER_MODEL } from "../../../../app-routing.constant";
@@ -65,6 +67,12 @@ function makeModel(overrides: {
 describe("UserModelComponent", () => {
   let component: UserModelComponent;
   let fixture: ComponentFixture<UserModelComponent>;
+  let hubService: {
+    getCounts: ReturnType<typeof vi.fn>;
+    isLiked: ReturnType<typeof vi.fn>;
+    getUserAccess: ReturnType<typeof vi.fn>;
+  };
+  let searchService: { getUserInfo: ReturnType<typeof vi.fn> };
   let modelService: {
     retrieveAccessibleModels: ReturnType<typeof vi.fn>;
     deleteModel: ReturnType<typeof vi.fn>;
@@ -78,6 +86,12 @@ describe("UserModelComponent", () => {
   ];
 
   beforeEach(async () => {
+    hubService = {
+      getCounts: vi.fn().mockReturnValue(of([])),
+      isLiked: vi.fn().mockReturnValue(of([])),
+      getUserAccess: vi.fn().mockReturnValue(of([])),
+    };
+    searchService = { getUserInfo: vi.fn().mockReturnValue(of({})) };
     modelService = {
       retrieveAccessibleModels: vi.fn().mockReturnValue(of(models)),
       deleteModel: vi.fn().mockReturnValue(of({})),
@@ -93,6 +107,8 @@ describe("UserModelComponent", () => {
         { provide: WorkflowPersistService, useValue: {} },
         { provide: WorkflowCoverService, useValue: {} },
         { provide: DatasetService, useValue: {} },
+        { provide: HubService, useValue: hubService },
+        { provide: SearchService, useValue: searchService },
         NzModalService,
         // card items render routerLinks, which need a router context
         provideRouter([]),
@@ -262,6 +278,101 @@ describe("UserModelComponent", () => {
       component.onClickOpenModelAddComponent();
 
       expect(navigate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("hub stats", () => {
+    it("fills view and like counts on the rendered entries", async () => {
+      // sorted CreateTimeDesc, so mid 2 (t=2000) precedes mid 1 (t=1000)
+      modelService.retrieveAccessibleModels.mockReturnValue(
+        of([makeModel({ mid: 1, creationTime: 1000 }), makeModel({ mid: 2, creationTime: 2000 })])
+      );
+      hubService.getCounts.mockClear();
+      hubService.isLiked.mockClear();
+      hubService.getCounts.mockReturnValue(of([{ counts: { view: 11, like: 2 } }, { counts: { view: 5, like: 0 } }]));
+      hubService.isLiked.mockReturnValue(of([{ isLiked: true }, { isLiked: false }]));
+
+      await component.search(true);
+
+      expect(hubService.getCounts).toHaveBeenCalledWith(
+        [EntityType.Model, EntityType.Model],
+        [2, 1],
+        [ActionType.View, ActionType.Like]
+      );
+      const entries = component.searchResultsComponent.entries;
+      expect(entries[0].viewCount).toBe(11);
+      expect(entries[0].likeCount).toBe(2);
+      expect(entries[0].isLiked).toBe(true);
+      expect(entries[1].viewCount).toBe(5);
+      expect(entries[1].isLiked).toBe(false);
+    });
+
+    it("leaves counts at zero when the hub call fails", async () => {
+      modelService.retrieveAccessibleModels.mockReturnValue(of([makeModel({ mid: 1 })]));
+      hubService.getCounts.mockReturnValue(throwError(() => new Error("hub down")));
+
+      await component.search(true);
+
+      const entries = component.searchResultsComponent.entries;
+      expect(entries.length).toBe(1);
+      expect(entries[0].viewCount).toBe(0);
+      expect(entries[0].likeCount).toBe(0);
+    });
+
+    it("resolves owner names so cards show the real username", async () => {
+      modelService.retrieveAccessibleModels.mockReturnValue(of([makeModel({ mid: 1 })]));
+      searchService.getUserInfo.mockReturnValue(of({ 1: { userName: "tanishq", googleAvatar: "g" } }));
+
+      await component.search(true);
+
+      expect(searchService.getUserInfo).toHaveBeenCalledWith([1]);
+      const entry = component.searchResultsComponent.entries[0];
+      expect(entry.ownerName).toBe("tanishq");
+      expect(entry.ownerGoogleAvatar).toBe("g");
+    });
+
+    it("leaves the owner name blank when the lookup fails", async () => {
+      modelService.retrieveAccessibleModels.mockReturnValue(of([makeModel({ mid: 1 })]));
+      searchService.getUserInfo.mockReturnValue(throwError(() => new Error("down")));
+
+      await component.search(true);
+
+      expect(component.searchResultsComponent.entries.length).toBe(1);
+      expect(component.searchResultsComponent.entries[0].ownerName).toBe("");
+    });
+
+    it("populates accessibleUserIds so an owner's card links to the user model page", async () => {
+      modelService.retrieveAccessibleModels.mockReturnValue(of([makeModel({ mid: 1 })]));
+      hubService.getUserAccess.mockReturnValue(of([{ entityType: EntityType.Model, entityId: 1, userIds: [1] }]));
+
+      await component.search(true);
+
+      expect(hubService.getUserAccess).toHaveBeenCalledWith([EntityType.Model], [1]);
+      expect(component.searchResultsComponent.entries[0].accessibleUserIds).toEqual([1]);
+    });
+
+    it("leaves accessibleUserIds empty when the access lookup fails", async () => {
+      modelService.retrieveAccessibleModels.mockReturnValue(of([makeModel({ mid: 1 })]));
+      hubService.getUserAccess.mockReturnValue(throwError(() => new Error("down")));
+
+      await component.search(true);
+
+      expect(component.searchResultsComponent.entries[0].accessibleUserIds).toEqual([]);
+    });
+
+    it("does not call the hub for an empty result set", async () => {
+      modelService.retrieveAccessibleModels.mockReturnValue(of([]));
+      hubService.getCounts.mockClear();
+      hubService.isLiked.mockClear();
+      searchService.getUserInfo.mockClear();
+      hubService.getUserAccess.mockClear();
+
+      await component.search(true);
+
+      expect(hubService.getUserAccess).not.toHaveBeenCalled();
+      expect(hubService.getCounts).not.toHaveBeenCalled();
+      expect(hubService.isLiked).not.toHaveBeenCalled();
+      expect(searchService.getUserInfo).not.toHaveBeenCalled();
     });
   });
 });

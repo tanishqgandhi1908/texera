@@ -63,6 +63,7 @@ import { extractErrorMessage } from "../../../../../common/util/error";
 import { WorkflowCoverService } from "../../../../service/user/workflow-cover/workflow-cover.service";
 import {
   HUB_DATASET_RESULT_DETAIL,
+  HUB_MODEL_RESULT_DETAIL,
   HUB_WORKFLOW_RESULT_DETAIL,
   USER_DATASET,
   USER_MODEL,
@@ -237,12 +238,15 @@ export class CardItemComponent implements OnChanges {
     } else if (this.entry.type === "model") {
       if (typeof this.entry.id === "number") {
         this.disableDelete = !this.entry.model.isOwner;
-        // accessibleUserIds stays empty for models: it is filled by SearchService via
-        // /hub/user-access // Link to the user route unconditionally — there is no hub model page. (TODO: #6501).
-        this.entryLink = [USER_MODEL, String(this.entry.id)];
+        this.owners = this.entry.accessibleUserIds;
+        if (this.currentUid !== undefined && this.owners.includes(this.currentUid)) {
+          this.entryLink = [USER_MODEL, String(this.entry.id)];
+        } else {
+          this.entryLink = [HUB_MODEL_RESULT_DETAIL, String(this.entry.id)];
+        }
         this.iconType = "experiment";
         this.size = this.entry.size;
-        // No model cover endpoint yet, so the card keeps the default preview.
+        this.loadModelCover(this.entry.id);
       }
     } else if (this.entry.type === "file") {
       // not sure where to redirect
@@ -268,6 +272,26 @@ export class CardItemComponent implements OnChanges {
     }
     this.datasetService
       .getDatasetCoverUrl(did)
+      .pipe(untilDestroyed(this))
+      .subscribe({
+        next: ({ url }) => {
+          this.coverImageSrc = url ?? CardItemComponent.DEFAULT_PREVIEW_IMAGE;
+          this.cdr.markForCheck();
+        },
+        error: () => {
+          this.coverImageSrc = CardItemComponent.DEFAULT_PREVIEW_IMAGE;
+          this.cdr.markForCheck();
+        },
+      });
+  }
+
+  /** Loads the model cover into the preview slot, falling back to the placeholder. */
+  private loadModelCover(mid: number): void {
+    if (!this.entry.coverImageUrl) {
+      return;
+    }
+    this.modelService
+      .getModelCoverUrl(mid)
       .pipe(untilDestroyed(this))
       .subscribe({
         next: ({ url }) => {
@@ -356,6 +380,8 @@ export class CardItemComponent implements OnChanges {
         .subscribe();
     } else if (this.entry.type === "dataset") {
       this.downloadService.downloadDataset(this.entry.id, this.entry.name).pipe(untilDestroyed(this)).subscribe();
+    } else if (this.entry.type === "model") {
+      this.downloadService.downloadModel(this.entry.id, this.entry.name).pipe(untilDestroyed(this)).subscribe();
     }
   };
 

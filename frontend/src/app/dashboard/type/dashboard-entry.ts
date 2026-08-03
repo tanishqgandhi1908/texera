@@ -160,6 +160,7 @@ export class DashboardEntry {
       this.likeCount = 0;
       this.isLiked = false;
       this.accessibleUserIds = [];
+      this.coverImageUrl = value.model.coverImage;
     } else if (isDashboardWorkflowComputingUnit(value)) {
       this.type = EntityType.ComputingUnit;
       this.id = value.computingUnit.cuid;

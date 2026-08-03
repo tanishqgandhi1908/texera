@@ -25,6 +25,8 @@ import { DashboardProject } from "../../../type/dashboard-project.interface";
 import { NotificationService } from "src/app/common/service/notification/notification.service";
 import { UserProjectService } from "../../../service/user/project/user-project.service";
 import { WorkflowPersistService } from "src/app/common/service/workflow-persist/workflow-persist.service";
+import { DatasetService } from "../../../service/user/dataset/dataset.service";
+import { ModelService } from "../../../service/user/model/model.service";
 import { SearchFilterParameters } from "../../../type/search-filter-parameters";
 import { UserService } from "../../../../common/service/user/user.service";
 import { switchMap } from "rxjs/operators";
@@ -71,6 +73,9 @@ export class FiltersComponent implements OnInit {
   private _masterFilterList: ReadonlyArray<string> = [];
   // receive input from parent components (UserProjectSection), if any
   @Input() public pid?: number = undefined;
+  // Which resource the host page is searching. Owners and the workflow-only
+  // facets are sourced from this; defaults to workflow for existing callers.
+  @Input() public resourceType: "workflow" | "dataset" | "model" = "workflow";
   @Output()
   public masterFilterListChange = new EventEmitter<typeof this._masterFilterList>();
   public get masterFilterList(): ReadonlyArray<string> {
@@ -121,6 +126,8 @@ export class FiltersComponent implements OnInit {
     private notificationService: NotificationService,
     private userProjectService: UserProjectService,
     private workflowPersistService: WorkflowPersistService,
+    private datasetService: DatasetService,
+    private modelService: ModelService,
     private cdr: ChangeDetectorRef
   ) {}
 
@@ -183,23 +190,39 @@ export class FiltersComponent implements OnInit {
         this.operatorGroups = opdata.groups.map(group => group.groupName);
       });
     if (this.isLogin) {
-      this.workflowPersistService
-        .retrieveOwners()
+      this.retrieveOwnersForResource()
         .pipe(untilDestroyed(this))
         .subscribe(list_of_owners => {
           this.owners = list_of_owners.map(i => ({ userName: i, checked: false }));
         });
-      this.workflowPersistService
-        .retrieveWorkflowIDs()
-        .pipe(untilDestroyed(this))
-        .subscribe(wids => {
-          this.wids = wids.map(wid => {
-            return {
-              id: wid.toString(),
-              checked: false,
-            };
+      if (this.isWorkflowSearch) {
+        this.workflowPersistService
+          .retrieveWorkflowIDs()
+          .pipe(untilDestroyed(this))
+          .subscribe(wids => {
+            this.wids = wids.map(wid => {
+              return {
+                id: wid.toString(),
+                checked: false,
+              };
+            });
           });
-        });
+      }
+    }
+  }
+
+  public get isWorkflowSearch(): boolean {
+    return this.resourceType === "workflow";
+  }
+
+  private retrieveOwnersForResource(): Observable<string[]> {
+    switch (this.resourceType) {
+      case "dataset":
+        return this.datasetService.retrieveOwners();
+      case "model":
+        return this.modelService.retrieveOwners();
+      default:
+        return this.workflowPersistService.retrieveOwners();
     }
   }
 

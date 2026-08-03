@@ -36,6 +36,7 @@ import type { Mocked } from "vitest";
 import { DashboardEntry } from "src/app/dashboard/type/dashboard-entry";
 import {
   HUB_DATASET_RESULT_DETAIL,
+  HUB_MODEL_RESULT_DETAIL,
   HUB_WORKFLOW_RESULT_DETAIL,
   USER_DATASET,
   USER_MODEL,
@@ -116,6 +117,7 @@ describe("CardItemComponent", () => {
       updateModelName: vi.fn(),
       updateModelDescription: vi.fn(),
       retrieveOwners: vi.fn().mockReturnValue(of([])),
+      getModelCoverUrl: vi.fn().mockReturnValue(of({ url: null })),
     };
 
     await TestBed.configureTestingModule({
@@ -731,16 +733,42 @@ describe("CardItemComponent", () => {
       expect(downloadDatasetSpy).toHaveBeenCalledWith(5, "mydataset");
     });
 
+    it("onClickDownload downloads a model via the download service", () => {
+      const downloadService = TestBed.inject(DownloadService);
+      const downloadModelSpy = vi.spyOn(downloadService, "downloadModel").mockReturnValue(of(new Blob()));
+      component.entry = makeModelEntry({ id: 9, name: "my-model" });
+
+      component.onClickDownload();
+
+      expect(downloadModelSpy).toHaveBeenCalledWith(9, "my-model");
+    });
+
     it("onClickDownload is a no-op when the entry has no id", () => {
       const downloadService = TestBed.inject(DownloadService);
       const downloadWorkflowSpy = vi.spyOn(downloadService, "downloadWorkflow");
       const downloadDatasetSpy = vi.spyOn(downloadService, "downloadDataset");
+      const downloadModelSpy = vi.spyOn(downloadService, "downloadModel");
       component.entry = makeWorkflowEntry({ id: undefined });
 
       component.onClickDownload();
 
       expect(downloadWorkflowSpy).not.toHaveBeenCalled();
       expect(downloadDatasetSpy).not.toHaveBeenCalled();
+      expect(downloadModelSpy).not.toHaveBeenCalled();
+    });
+
+    it("onClickDownload is a no-op for a project entry", () => {
+      const downloadService = TestBed.inject(DownloadService);
+      const downloadWorkflowSpy = vi.spyOn(downloadService, "downloadWorkflow");
+      const downloadDatasetSpy = vi.spyOn(downloadService, "downloadDataset");
+      const downloadModelSpy = vi.spyOn(downloadService, "downloadModel");
+      component.entry = makeWorkflowEntry({ id: 3, type: "project" } as any);
+
+      component.onClickDownload();
+
+      expect(downloadWorkflowSpy).not.toHaveBeenCalled();
+      expect(downloadDatasetSpy).not.toHaveBeenCalled();
+      expect(downloadModelSpy).not.toHaveBeenCalled();
     });
 
     it("onClickOpenShareAccess opens the workflow share modal and forwards refresh events", async () => {
@@ -922,9 +950,9 @@ describe("CardItemComponent", () => {
   });
 
   describe("model entries", () => {
-    it("links to the user model page, uses the flask icon, and carries the size", () => {
+    it("links an accessible model to the user model page, uses the flask icon, and carries the size", () => {
       component.currentUid = 1;
-      component.entry = makeModelEntry({ id: 9, size: 4096 });
+      component.entry = makeModelEntry({ id: 9, size: 4096, accessibleUserIds: [1] } as any);
 
       component.initializeEntry();
 
@@ -934,13 +962,22 @@ describe("CardItemComponent", () => {
       expect(component.disableDelete).toBe(false);
     });
 
-    it("links to the user model page even when the current user is not in accessibleUserIds", () => {
+    it("links a non-owned model to the hub model detail page", () => {
       component.currentUid = 1;
       component.entry = makeModelEntry({ id: 10, accessibleUserIds: [999] } as any);
 
       component.initializeEntry();
 
-      expect(component.entryLink).toEqual([USER_MODEL, "10"]);
+      expect(component.entryLink).toEqual([HUB_MODEL_RESULT_DETAIL, "10"]);
+    });
+
+    it("links a model to the hub detail page for an anonymous visitor", () => {
+      component.currentUid = undefined;
+      component.entry = makeModelEntry({ id: 10, accessibleUserIds: [] } as any);
+
+      component.initializeEntry();
+
+      expect(component.entryLink).toEqual([HUB_MODEL_RESULT_DETAIL, "10"]);
     });
 
     it("disables delete for a model the user does not own", () => {
@@ -951,12 +988,32 @@ describe("CardItemComponent", () => {
       expect(component.disableDelete).toBe(true);
     });
 
-    it("does not fetch a cover image for a model", () => {
-      component.entry = makeModelEntry({ id: 12, coverImageUrl: "https://example/x.png" } as any);
+    it("loads the model cover from the model endpoint, not the dataset one", () => {
+      modelService.getModelCoverUrl.mockReturnValue(of({ url: "https://example/model-cover.png" }));
+      component.entry = makeModelEntry({ id: 12, coverImageUrl: "v1/cover.png" } as any);
 
       component.initializeEntry();
 
+      expect(modelService.getModelCoverUrl).toHaveBeenCalledWith(12);
       expect(datasetService.getDatasetCoverUrl).not.toHaveBeenCalled();
+      expect(component.coverImageSrc).toBe("https://example/model-cover.png");
+    });
+
+    it("keeps the placeholder for a model with no cover image", () => {
+      component.entry = makeModelEntry({ id: 12, coverImageUrl: undefined } as any);
+
+      component.initializeEntry();
+
+      expect(modelService.getModelCoverUrl).not.toHaveBeenCalled();
+      expect(component.coverImageSrc).toBe(CardItemComponent.DEFAULT_PREVIEW_IMAGE);
+    });
+
+    it("falls back to the placeholder when the model cover request fails", () => {
+      modelService.getModelCoverUrl.mockReturnValue(throwError(() => new Error("boom")));
+      component.entry = makeModelEntry({ id: 12, coverImageUrl: "v1/cover.png" } as any);
+
+      component.initializeEntry();
+
       expect(component.coverImageSrc).toBe(CardItemComponent.DEFAULT_PREVIEW_IMAGE);
     });
 

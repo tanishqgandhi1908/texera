@@ -109,12 +109,13 @@ class HubEntityModelSpec extends AnyFlatSpec {
   "EntityType subtypes" should "expose their lowercase string value" in {
     assert(EntityType.Workflow.value == "workflow")
     assert(EntityType.Dataset.value == "dataset")
+    assert(EntityType.Model.value == "model")
   }
 
   it should "have toString equal to value (override pin)" in {
     // Same stable-name pattern as ActionType — don't use the SUT
     // (toString) in the failure message.
-    val all: List[EntityType] = List(EntityType.Workflow, EntityType.Dataset)
+    val all: List[EntityType] = List(EntityType.Workflow, EntityType.Dataset, EntityType.Model)
     all.foreach { e =>
       val name = e.getClass.getSimpleName
       assert(e.toString == e.value, s"$name.toString = '${e.toString}' but value = '${e.value}'")
@@ -124,11 +125,13 @@ class HubEntityModelSpec extends AnyFlatSpec {
   "EntityType.fromString" should "match each subtype exactly" in {
     assert(EntityType.fromString("workflow") == EntityType.Workflow)
     assert(EntityType.fromString("dataset") == EntityType.Dataset)
+    assert(EntityType.fromString("model") == EntityType.Model)
   }
 
   it should "match case-insensitively" in {
     assert(EntityType.fromString("WORKFLOW") == EntityType.Workflow)
     assert(EntityType.fromString("Dataset") == EntityType.Dataset)
+    assert(EntityType.fromString("MODEL") == EntityType.Model)
   }
 
   it should "throw IllegalArgumentException for an unknown kind, naming the input" in {
@@ -148,8 +151,10 @@ class HubEntityModelSpec extends AnyFlatSpec {
   "EntityType Jackson round-trip" should "serialize / deserialize each subtype as its lowercase string value" in {
     assert(objectMapper.writeValueAsString(EntityType.Workflow: EntityType) == "\"workflow\"")
     assert(objectMapper.writeValueAsString(EntityType.Dataset: EntityType) == "\"dataset\"")
+    assert(objectMapper.writeValueAsString(EntityType.Model: EntityType) == "\"model\"")
     assert(objectMapper.readValue("\"workflow\"", classOf[EntityType]) == EntityType.Workflow)
     assert(objectMapper.readValue("\"dataset\"", classOf[EntityType]) == EntityType.Dataset)
+    assert(objectMapper.readValue("\"model\"", classOf[EntityType]) == EntityType.Model)
   }
 
   // ---------------------------------------------------------------------------
@@ -172,6 +177,14 @@ class HubEntityModelSpec extends AnyFlatSpec {
     assert(t.idColumn == DATASET.DID)
   }
 
+  it should "dispatch Model → ModelTable" in {
+    val t = EntityTables.BaseEntityTable(EntityType.Model)
+    assert(t == EntityTables.BaseEntityTable.ModelTable)
+    assert(t.table == MODEL)
+    assert(t.isPublicColumn == MODEL.IS_PUBLIC)
+    assert(t.idColumn == MODEL.MID)
+  }
+
   // ---------------------------------------------------------------------------
   // EntityTables.LikeTable
   // ---------------------------------------------------------------------------
@@ -190,6 +203,14 @@ class HubEntityModelSpec extends AnyFlatSpec {
     assert(t.table == DATASET_USER_LIKES)
     assert(t.uidColumn == DATASET_USER_LIKES.UID)
     assert(t.idColumn == DATASET_USER_LIKES.DID)
+  }
+
+  it should "dispatch Model → ModelLikeTable" in {
+    val t = EntityTables.LikeTable(EntityType.Model)
+    assert(t == EntityTables.LikeTable.ModelLikeTable)
+    assert(t.table == MODEL_USER_LIKES)
+    assert(t.uidColumn == MODEL_USER_LIKES.UID)
+    assert(t.idColumn == MODEL_USER_LIKES.MID)
   }
 
   // ---------------------------------------------------------------------------
@@ -213,6 +234,23 @@ class HubEntityModelSpec extends AnyFlatSpec {
     assert(ex.getMessage.contains("clone"))
   }
 
+  it should "throw IllegalArgumentException for Model (clone is workflow-only)" in {
+    val ex = intercept[IllegalArgumentException] {
+      EntityTables.CloneTable(EntityType.Model)
+    }
+    assert(ex.getMessage.contains("clone"))
+  }
+
+  "EntityTables.CloneTable.get" should "be defined only for cloneable entity types" in {
+    assert(
+      EntityTables.CloneTable
+        .get(EntityType.Workflow)
+        .contains(EntityTables.CloneTable.WorkflowCloneTable)
+    )
+    assert(EntityTables.CloneTable.get(EntityType.Dataset).isEmpty)
+    assert(EntityTables.CloneTable.get(EntityType.Model).isEmpty)
+  }
+
   // ---------------------------------------------------------------------------
   // EntityTables.ViewCountTable
   // ---------------------------------------------------------------------------
@@ -231,5 +269,13 @@ class HubEntityModelSpec extends AnyFlatSpec {
     assert(t.table == DATASET_VIEW_COUNT)
     assert(t.idColumn == DATASET_VIEW_COUNT.DID)
     assert(t.viewCountColumn == DATASET_VIEW_COUNT.VIEW_COUNT)
+  }
+
+  it should "dispatch Model → ModelViewCountTable" in {
+    val t = EntityTables.ViewCountTable(EntityType.Model)
+    assert(t == EntityTables.ViewCountTable.ModelViewCountTable)
+    assert(t.table == MODEL_VIEW_COUNT)
+    assert(t.idColumn == MODEL_VIEW_COUNT.MID)
+    assert(t.viewCountColumn == MODEL_VIEW_COUNT.VIEW_COUNT)
   }
 }

@@ -496,6 +496,46 @@ class ModelResourceSpec
     }
   }
 
+  "getPublicModelVersionList" should "list versions of a public model without authentication" in {
+    val created = modelResource.createModel(
+      ModelResource.CreateModelRequest(
+        modelName = "public-version-list",
+        modelDescription = "d",
+        isModelPublic = true,
+        isModelDownloadable = true,
+        framework = "pytorch",
+        format = null
+      ),
+      sessionUser
+    )
+
+    modelResource.getPublicModelVersionList(created.model.getMid) shouldBe empty
+  }
+
+  it should "forbid listing versions of a private model" in {
+    val created = modelResource.createModel(
+      ModelResource.CreateModelRequest(
+        modelName = "public-version-list-private",
+        modelDescription = "d",
+        isModelPublic = false,
+        isModelDownloadable = true,
+        framework = "pytorch",
+        format = null
+      ),
+      sessionUser
+    )
+
+    assertThrows[ForbiddenException] {
+      modelResource.getPublicModelVersionList(created.model.getMid)
+    }
+  }
+
+  it should "reject an unknown model id" in {
+    assertThrows[NotFoundException] {
+      modelResource.getPublicModelVersionList(999999)
+    }
+  }
+
   "listModels" should "include public models owned by another user" in {
     val othersPublic = modelResource.createModel(
       ModelResource.CreateModelRequest(

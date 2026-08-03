@@ -247,7 +247,13 @@ describe("DashboardEntry", () => {
       expect(entry.ownerId).toBe(60);
     });
 
-    it("leaves coverImageUrl undefined for a model, since models have no cover image yet", () => {
+    it("copies the model cover image into coverImageUrl", () => {
+      const model = makeModel();
+      model.model.coverImage = "v1/cover.png";
+      expect(new DashboardEntry(model).coverImageUrl).toBe("v1/cover.png");
+    });
+
+    it("leaves coverImageUrl undefined for a model with no cover image", () => {
       expect(new DashboardEntry(makeModel()).coverImageUrl).toBeUndefined();
     });
 

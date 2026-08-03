@@ -40,6 +40,8 @@ export const MODEL_GET_OWNERS_URL = MODEL_BASE_URL + "/user-model-owners";
 
 export const MODEL_VERSION_BASE_URL = "version";
 export const MODEL_VERSION_RETRIEVE_LIST_URL = MODEL_VERSION_BASE_URL + "/list";
+export const MODEL_PUBLIC_VERSION_BASE_URL = "publicVersion";
+export const MODEL_PUBLIC_VERSION_RETRIEVE_LIST_URL = MODEL_PUBLIC_VERSION_BASE_URL + "/list";
 export const MODEL_VERSION_LATEST_URL = MODEL_VERSION_BASE_URL + "/latest";
 
 export const DEFAULT_MODEL_NAME = "Untitled-model";
@@ -132,6 +134,16 @@ export class ModelService {
     return this.http.get<string[]>(`${AppSettings.getApiEndpoint()}/${MODEL_GET_OWNERS_URL}`);
   }
 
+  public updateModelCoverImage(mid: number, coverImage: string): Observable<Response> {
+    return this.http.post<Response>(`${AppSettings.getApiEndpoint()}/${MODEL_BASE_URL}/${mid}/update/cover`, {
+      coverImage: coverImage,
+    });
+  }
+
+  public getModelCoverUrl(mid: number): Observable<{ url: string | null }> {
+    return this.http.get<{ url: string | null }>(`${AppSettings.getApiEndpoint()}/${MODEL_BASE_URL}/${mid}/cover-url`);
+  }
+
   public createModelVersion(mid: number, newVersion: string): Observable<ModelVersion> {
     return this.http
       .post<{
@@ -205,14 +217,10 @@ export class ModelService {
     );
   }
 
-  /**
-   * Retrieve a model's versions, newest first. No isLogin variant: models have no public
-   * version endpoint yet, which arrives with the hub work under #6494 that makes them browsable.
-   */
-  public retrieveModelVersionList(mid: number): Observable<ModelVersion[]> {
-    return this.http.get<ModelVersion[]>(
-      `${AppSettings.getApiEndpoint()}/${MODEL_BASE_URL}/${mid}/${MODEL_VERSION_RETRIEVE_LIST_URL}`
-    );
+  /** Retrieve a model's versions, newest first; anonymous callers get the public-only endpoint. */
+  public retrieveModelVersionList(mid: number, isLogin: boolean = true): Observable<ModelVersion[]> {
+    const listUrl = isLogin ? MODEL_VERSION_RETRIEVE_LIST_URL : MODEL_PUBLIC_VERSION_RETRIEVE_LIST_URL;
+    return this.http.get<ModelVersion[]>(`${AppSettings.getApiEndpoint()}/${MODEL_BASE_URL}/${mid}/${listUrl}`);
   }
 
   public retrieveModelLatestVersion(mid: number): Observable<ModelVersion> {
@@ -231,10 +239,12 @@ export class ModelService {
 
   public retrieveModelVersionFileTree(
     mid: number,
-    mvid: number
+    mvid: number,
+    isLogin: boolean = true
   ): Observable<{ fileNodes: DatasetFileNode[]; size: number }> {
+    const versionSegment = isLogin ? MODEL_VERSION_BASE_URL : MODEL_PUBLIC_VERSION_BASE_URL;
     return this.http.get<{ fileNodes: DatasetFileNode[]; size: number }>(
-      `${AppSettings.getApiEndpoint()}/${MODEL_BASE_URL}/${mid}/${MODEL_VERSION_BASE_URL}/${mvid}/rootFileNodes`
+      `${AppSettings.getApiEndpoint()}/${MODEL_BASE_URL}/${mid}/${versionSegment}/${mvid}/rootFileNodes`
     );
   }
 
