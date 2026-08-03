@@ -237,4 +237,39 @@ class PythonUDFOpDescV2Spec extends AnyFlatSpec with Matchers {
       case other                   => fail(s"expected OpExecWithCode, got $other")
     }
   }
+
+  private def binding(name: String, path: String): ModelVariableMapping = {
+    val m = new ModelVariableMapping
+    m.variableName = name
+    m.modelPath = path
+    m
+  }
+
+  "PythonUDFOpDescV2 model-variable bindings" should
+    "carry no mounted models when nothing is bound" in {
+    val d = new PythonUDFOpDescV2
+    d.code = "yield t"
+    d.getPhysicalOp(workflowId, executionId).mountedModels shouldBe empty
+  }
+
+  it should "ignore fully blank model-variable rows" in {
+    val d = new PythonUDFOpDescV2
+    d.code = "yield t"
+    d.modelVariables = List(binding("", ""), binding("   ", "   "))
+    d.getPhysicalOp(workflowId, executionId).mountedModels shouldBe empty
+  }
+
+  it should "reject a variable name that is not a valid Python identifier" in {
+    val d = new PythonUDFOpDescV2
+    d.modelVariables = List(binding("1bad", "/models/bob@texera.com/resnet/v1"))
+    val ex = intercept[RuntimeException] { d.getPhysicalOp(workflowId, executionId) }
+    ex.getMessage should include("not a valid Python variable name")
+  }
+
+  it should "reject a bound variable with no model selected" in {
+    val d = new PythonUDFOpDescV2
+    d.modelVariables = List(binding("A", "   "))
+    val ex = intercept[RuntimeException] { d.getPhysicalOp(workflowId, executionId) }
+    ex.getMessage should include("No model selected")
+  }
 }

@@ -170,6 +170,16 @@
           </i>
           <i
             nz-icon
+            nzType="deployment-unit"
+            nz-tooltip
+            *ngIf="unit.isOwner && unit.computingUnit.type === 'kubernetes'"
+            [nzTooltipTitle]="'Mount models into computing unit'"
+            (click)="onClickOpenMountModels(unit); $event.stopPropagation()"
+            role="button"
+            aria-label="Mount models into computing unit">
+          </i>
+          <i
+            nz-icon
             nzType="share-alt"
             nz-tooltip
             *ngIf="this.config.env.sharingComputingUnitEnabled"

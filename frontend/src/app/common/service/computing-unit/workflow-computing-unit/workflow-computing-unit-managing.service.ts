@@ -34,6 +34,16 @@ export const COMPUTING_UNIT_CREATE_URL = `${COMPUTING_UNIT_BASE_URL}/create`;
 export const COMPUTING_UNIT_LIST_URL = `${COMPUTING_UNIT_BASE_URL}`;
 export const COMPUTING_UNIT_TYPES_URL = `${COMPUTING_UNIT_BASE_URL}/types`;
 
+/** A model version mounted on a computing unit. */
+export interface MountedModelInfo {
+  /** Human-readable /models/ownerEmail/modelName/versionName ("" if it could not be resolved). */
+  modelPath: string;
+  repositoryName: string;
+  commitHash: string;
+  /** Local (in-pod) path where the model is mounted. */
+  mountPath: string;
+}
+
 @Injectable({
   providedIn: "root",
 })
@@ -189,6 +199,41 @@ export class WorkflowComputingUnitManagingService {
     return this.http.put<Response>(
       `${AppSettings.getApiEndpoint()}/${COMPUTING_UNIT_BASE_URL}/${cuid}/rename/${encodeURIComponent(name)}`,
       {}
+    );
+  }
+
+  /**
+   * List the models currently mounted on a computing unit.
+   * @param cuid The ID of the computing unit.
+   */
+  public listMountedModels(cuid: number): Observable<MountedModelInfo[]> {
+    return this.http.get<MountedModelInfo[]>(
+      `${AppSettings.getApiEndpoint()}/${COMPUTING_UNIT_BASE_URL}/${cuid}/mounts`
+    );
+  }
+
+  /**
+   * Mount a model version onto a computing unit.
+   * @param cuid The ID of the computing unit.
+   * @param modelPath The /models/ownerEmail/modelName/versionName path to mount.
+   */
+  public mountModel(cuid: number, modelPath: string): Observable<MountedModelInfo> {
+    return this.http.post<MountedModelInfo>(
+      `${AppSettings.getApiEndpoint()}/${COMPUTING_UNIT_BASE_URL}/${cuid}/mounts`,
+      { modelPath }
+    );
+  }
+
+  /**
+   * Unmount a model version from a computing unit.
+   * @param cuid The ID of the computing unit.
+   * @param modelPath The /models/ownerEmail/modelName/versionName path to unmount.
+   */
+  public unmountModel(cuid: number, modelPath: string): Observable<Response> {
+    return this.http.request<Response>(
+      "delete",
+      `${AppSettings.getApiEndpoint()}/${COMPUTING_UNIT_BASE_URL}/${cuid}/mounts`,
+      { body: { modelPath } }
     );
   }
 }

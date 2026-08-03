@@ -23,6 +23,7 @@ import com.fasterxml.jackson.annotation.{JsonProperty, JsonPropertyDescription}
 import com.google.common.base.Preconditions
 import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaTitle
 import org.apache.texera.amber.core.executor.OpExecWithCode
+import org.apache.texera.amber.core.storage.FileResolver
 import org.apache.texera.amber.core.tuple.{Attribute, Schema}
 import org.apache.texera.amber.core.virtualidentity.{ExecutionIdentity, WorkflowIdentity}
 import org.apache.texera.amber.core.workflow._
@@ -35,7 +36,12 @@ class PythonUDFOpDescV2 extends LogicalOp {
   @JsonProperty(
     required = true,
     defaultValue =
-      "# Choose from the following templates:\n" +
+      "# Models mounted on this computing unit and bound to variables in the\n" +
+        "# \"Mounted model variables\" property are available as local paths. For\n" +
+        "# example, if you bind a model to the variable M:\n" +
+        "#     torch.load(f\"{M}/model.pt\")\n" +
+        "# \n" +
+        "# Choose from the following templates:\n" +
         "# \n" +
         "# from pytexera import *\n" +
         "# \n" +
@@ -90,6 +96,14 @@ class PythonUDFOpDescV2 extends LogicalOp {
     "Name of the newly added output columns that the UDF will produce, if any"
   )
   var outputColumns: List[Attribute] = List()
+
+  @JsonProperty()
+  @JsonSchemaTitle("Mounted model variables")
+  @JsonPropertyDescription(
+    "Bind models mounted on this computing unit to variables. In your code, each " +
+      "variable holds the local filesystem path to that model."
+  )
+  var modelVariables: List[ModelVariableMapping] = List()
 
   override def getPhysicalOp(
       workflowId: WorkflowIdentity,
@@ -156,6 +170,35 @@ class PythonUDFOpDescV2 extends LogicalOp {
         trimmed
       }
 
+    // Resolve each bound model version to a "<repositoryName>:<commitHash>" locator,
+    // keyed by the Python variable it will be exposed as.
+    val variableBindings = Option(modelVariables).getOrElse(List.empty).flatMap { mapping =>
+      val variableName = Option(mapping.variableName).map(_.trim).getOrElse("")
+      val modelPath = Option(mapping.modelPath).map(_.trim).getOrElse("")
+      if (variableName.isEmpty && modelPath.isEmpty) None // ignore fully blank rows
+      else {
+        if (!variableName.matches("[A-Za-z_][A-Za-z0-9_]*"))
+          throw new RuntimeException(
+            s"'$variableName' is not a valid Python variable name for a mounted model."
+          )
+        if (modelPath.isEmpty)
+          throw new RuntimeException(
+            s"No model selected for the mounted-model variable '$variableName'."
+          )
+        val (repositoryName, versionHash) = FileResolver.resolveModelVersion(modelPath)
+        Some(variableName -> s"$repositoryName:$versionHash")
+      }
+    }
+    val duplicateVariables =
+      variableBindings.map(_._1).groupBy(identity).collect {
+        case (name, xs) if xs.size > 1 => name
+      }
+    if (duplicateVariables.nonEmpty)
+      throw new RuntimeException(
+        s"Duplicate mounted-model variable name(s): ${duplicateVariables.mkString(", ")}"
+      )
+    val mountedModels = variableBindings.toMap
+
     physicalOp
       .withDerivePartition(_ => UnknownPartition())
       .withInputPorts(operatorInfo.inputPorts)
@@ -164,6 +207,7 @@ class PythonUDFOpDescV2 extends LogicalOp {
       .withIsOneToManyOp(true)
       .withPropagateSchema(SchemaPropagationFunc(propagateSchema))
       .withPveName(pveName)
+      .withMountedModels(mountedModels)
   }
 
   override def operatorInfo: OperatorInfo = {

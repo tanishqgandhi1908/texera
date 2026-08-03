@@ -214,7 +214,11 @@ case class PhysicalOp(
     // hint for number of workers
     suggestedWorkerNum: Option[Int] = None,
     // name of the PVE to execute within
-    pveName: String = ""
+    pveName: String = "",
+    // models to expose to this operator's Python workers as local-path variables:
+    // variable name -> model-version locator "<repositoryName>:<commitHash>". Each is
+    // ensured mounted before the worker starts and bound to the variable as its mount path.
+    mountedModels: Map[String, String] = Map.empty
 ) extends LazyLogging {
 
   // all the "dependee" links are also blocking
@@ -391,6 +395,10 @@ case class PhysicalOp(
 
   def withPveName(name: String): PhysicalOp = {
     this.copy(pveName = name)
+  }
+
+  def withMountedModels(mountedModels: Map[String, String]): PhysicalOp = {
+    this.copy(mountedModels = mountedModels)
   }
 
   /**

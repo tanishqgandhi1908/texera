@@ -233,38 +233,103 @@ object FileResolver {
       s"Model file $fileName not found."
     ) { (ownerEmail, modelName, versionName) =>
       // fetch the model and version from DB to get the repository name and version hash
-      withTransaction(
-        SqlServer
-          .getInstance()
-          .createDSLContext()
-      ) { ctx =>
-        // fetch the model from DB
-        val model = ctx
-          .select(MODEL.fields: _*)
-          .from(MODEL)
-          .leftJoin(USER)
-          .on(USER.UID.eq(MODEL.OWNER_UID))
-          .where(USER.EMAIL.eq(ownerEmail))
-          .and(MODEL.NAME.eq(modelName))
-          .fetchOneInto(classOf[Model])
+      fetchModelVersion(ownerEmail, modelName, versionName, s"file $fileName")
+    }
 
-        // fail early if the model does not exist (before dereferencing it below)
-        if (model == null) {
-          throw new FileNotFoundException(s"Model file $fileName not found.")
-        }
+  /**
+    * Resolves a model version path to its LakeFS repository name and commit hash.
+    * Expected format: /models/ownerEmail/modelName/versionName
+    *   e.g. /models/bob@texera.com/resnet/v1
+    *
+    * Unlike [[resolve]], this addresses a whole model *version* rather than a file inside
+    * it: a mount exposes the entire version, so no file-relative path is involved.
+    *
+    * @param modelPath the model version path to resolve
+    * @throws java.io.FileNotFoundException if the model or version cannot be found, or the
+    *                                       path is not a well-formed model version path
+    * @return (repositoryName, versionHash) of the model version
+    */
+  def resolveModelVersion(modelPath: String): (String, String) = {
+    val path = Paths.get(modelPath)
+    val segments = (0 until path.getNameCount).map(path.getName(_).toString)
+    if (segments.length < 4 || segments(0) != ResourceType.Models.toString) {
+      throw new FileNotFoundException(
+        s"Model version path $modelPath is invalid; " +
+          s"expected /${ResourceType.Models}/ownerEmail/modelName/versionName."
+      )
+    }
+    fetchModelVersion(segments(1), segments(2), segments(3), modelPath)
+  }
 
-        // fetch the model version from DB
-        val modelVersion = ctx
-          .selectFrom(MODEL_VERSION)
-          .where(MODEL_VERSION.MID.eq(model.getMid))
-          .and(MODEL_VERSION.NAME.eq(versionName))
-          .fetchOneInto(classOf[ModelVersion])
+  /**
+    * Reverse of [[resolveModelVersion]]: given a LakeFS repository name and commit hash,
+    * recover the human-readable model version path /models/ownerEmail/modelName/versionName.
+    * Used to label models mounted on a computing unit (which the mounter only tracks by
+    * repository/commit). Returns None if no matching model version exists.
+    */
+  def reverseResolveModelVersion(
+      repositoryName: String,
+      versionHash: String
+  ): Option[String] =
+    withTransaction(
+      SqlServer
+        .getInstance()
+        .createDSLContext()
+    ) { ctx =>
+      val record = ctx
+        .select(USER.EMAIL, MODEL.NAME, MODEL_VERSION.NAME)
+        .from(MODEL)
+        .join(USER)
+        .on(USER.UID.eq(MODEL.OWNER_UID))
+        .join(MODEL_VERSION)
+        .on(MODEL_VERSION.MID.eq(MODEL.MID))
+        .where(MODEL.REPOSITORY_NAME.eq(repositoryName))
+        .and(MODEL_VERSION.VERSION_HASH.eq(versionHash))
+        .fetchOne()
+      Option(record).map(r => s"/${ResourceType.Models}/${r.value1()}/${r.value2()}/${r.value3()}")
+    }
 
-        if (modelVersion == null) {
-          throw new FileNotFoundException(s"Model file $fileName not found.")
-        }
-        (model.getRepositoryName, modelVersion.getVersionHash)
+  /**
+    * Fetches a model and one of its versions from the DB by owner email, model name and
+    * version name, returning the version's (repositoryName, versionHash).
+    *
+    * @param originalPath the caller's original path, used only for the error message
+    * @throws java.io.FileNotFoundException if the model or the version cannot be found
+    */
+  private def fetchModelVersion(
+      ownerEmail: String,
+      modelName: String,
+      versionName: String,
+      originalPath: String
+  ): (String, String) =
+    withTransaction(
+      SqlServer
+        .getInstance()
+        .createDSLContext()
+    ) { ctx =>
+      val model = ctx
+        .select(MODEL.fields: _*)
+        .from(MODEL)
+        .leftJoin(USER)
+        .on(USER.UID.eq(MODEL.OWNER_UID))
+        .where(USER.EMAIL.eq(ownerEmail))
+        .and(MODEL.NAME.eq(modelName))
+        .fetchOneInto(classOf[Model])
+
+      if (model == null) {
+        throw new FileNotFoundException(s"Model $originalPath not found.")
       }
+
+      val modelVersion = ctx
+        .selectFrom(MODEL_VERSION)
+        .where(MODEL_VERSION.MID.eq(model.getMid))
+        .and(MODEL_VERSION.NAME.eq(versionName))
+        .fetchOneInto(classOf[ModelVersion])
+
+      if (modelVersion == null) {
+        throw new FileNotFoundException(s"Model $originalPath not found.")
+      }
+      (model.getRepositoryName, modelVersion.getVersionHash)
     }
 
   /**

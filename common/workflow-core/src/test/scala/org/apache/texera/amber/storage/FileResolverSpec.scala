@@ -235,6 +235,63 @@ class FileResolverSpec
     }
   }
 
+  "resolveModelVersion" should "resolve a model version path to its repository and commit" in {
+    assert(
+      FileResolver.resolveModelVersion("/models/test_user@test.com/test_model/v2") ==
+        (testModel.getRepositoryName, testModelVersion2.getVersionHash)
+    )
+    assert(
+      FileResolver.resolveModelVersion("/models/test_user@test.com/test_model/v1") ==
+        (testModel.getRepositoryName, testModelVersion1.getVersionHash)
+    )
+  }
+
+  it should "reject a path that is not a well-formed model version path" in {
+    // too few segments, no models prefix, a dataset path, and an unknown version
+    for (
+      bad <- Seq(
+        "/models/test_user@test.com/test_model",
+        "/test_user@test.com/test_model/v1",
+        "/datasets/test_user@test.com/test_dataset/v1",
+        "/models/test_user@test.com/test_model/no_such_version",
+        "/models/nobody@test.com/test_model/v1",
+        ""
+      )
+    ) {
+      withClue(s"path '$bad': ") {
+        assertThrows[FileNotFoundException] {
+          FileResolver.resolveModelVersion(bad)
+        }
+      }
+    }
+  }
+
+  "reverseResolveModelVersion" should "recover the model version path from repository and commit" in {
+    assert(
+      FileResolver.reverseResolveModelVersion(
+        testModel.getRepositoryName,
+        testModelVersion2.getVersionHash
+      ) == Some("/models/test_user@test.com/test_model/v2")
+    )
+  }
+
+  it should "return None when no model version matches" in {
+    assert(
+      FileResolver
+        .reverseResolveModelVersion("model-does-not-exist", testModelVersion1.getVersionHash)
+        .isEmpty
+    )
+    assert(
+      FileResolver.reverseResolveModelVersion(testModel.getRepositoryName, "deadbeef").isEmpty
+    )
+  }
+
+  it should "round-trip with resolveModelVersion" in {
+    val path = "/models/test_user@test.com/test_model/v1"
+    val (repositoryName, versionHash) = FileResolver.resolveModelVersion(path)
+    assert(FileResolver.reverseResolveModelVersion(repositoryName, versionHash) == Some(path))
+  }
+
   "isFileResolved" should "return true when the path has a non-empty scheme" in {
     assert(FileResolver.isFileResolved("s3://bucket/key"))
     assert(

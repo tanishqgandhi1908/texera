@@ -60,6 +60,7 @@ class PythonWorkflowWorkerStartupConfigSpec extends AnyFlatSpec {
   private val expectedKeys = Set(
     "workerId",
     "outputPort",
+    "mountedModels",
     "loggerLevel",
     "rPath",
     "icebergCatalogType",
@@ -90,6 +91,25 @@ class PythonWorkflowWorkerStartupConfigSpec extends AnyFlatSpec {
     assert(map("outputPort") == "6000")
     assert(map("rPath") == "/opt/R")
     assert(map("s3LargeBinariesBaseUri") == "s3://bucket/uri")
+  }
+
+  it should "default the mounted models to an empty JSON object when the worker mounts nothing" in {
+    val map =
+      PythonWorkflowWorker.buildStartupConfig("worker-7", "6000", "/opt/R", "s3://bucket/uri").toMap
+    assert(map("mountedModels") == "{}")
+  }
+
+  it should "carry the mounted model variable bindings when the worker mounts repositories" in {
+    val map = PythonWorkflowWorker
+      .buildStartupConfig(
+        "worker-7",
+        "6000",
+        "/opt/R",
+        "s3://bucket/uri",
+        """{"M":"/mnt/texera-mounts/r/c"}"""
+      )
+      .toMap
+    assert(map("mountedModels") == """{"M":"/mnt/texera-mounts/r/c"}""")
   }
 
   it should "produce a config that round-trips through encodeStartupConfig" in {
