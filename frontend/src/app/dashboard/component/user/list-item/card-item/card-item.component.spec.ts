@@ -36,14 +36,17 @@ import type { Mocked } from "vitest";
 import { DashboardEntry } from "src/app/dashboard/type/dashboard-entry";
 import {
   HUB_DATASET_RESULT_DETAIL,
+  HUB_MODEL_RESULT_DETAIL,
   HUB_WORKFLOW_RESULT_DETAIL,
   USER_DATASET,
+  USER_MODEL,
   USER_PROJECT,
   USER_WORKSPACE,
 } from "../../../../../app-routing.constant";
 import { WorkflowCoverService } from "src/app/dashboard/service/user/workflow-cover/workflow-cover.service";
 import { NotificationService } from "../../../../../common/service/notification/notification.service";
 import { DatasetService, DEFAULT_DATASET_NAME } from "../../../../service/user/dataset/dataset.service";
+import { DEFAULT_MODEL_NAME, ModelService } from "../../../../service/user/model/model.service";
 import { DownloadService } from "src/app/dashboard/service/user/download/download.service";
 
 function makeWorkflowEntry(overrides: Partial<DashboardEntry> = {}): DashboardEntry {
@@ -78,12 +81,29 @@ function makeDatasetEntry(overrides: Partial<DashboardEntry> = {}): DashboardEnt
   } as unknown as DashboardEntry;
 }
 
+function makeModelEntry(overrides: Partial<DashboardEntry> = {}): DashboardEntry {
+  return {
+    id: 9,
+    name: "my-model",
+    description: "",
+    type: "model",
+    model: { isOwner: true },
+    accessibleUserIds: [],
+    likeCount: 0,
+    viewCount: 0,
+    isLiked: false,
+    size: 0,
+    ...overrides,
+  } as unknown as DashboardEntry;
+}
+
 describe("CardItemComponent", () => {
   let component: CardItemComponent;
   let fixture: ComponentFixture<CardItemComponent>;
   let workflowPersistService: Mocked<WorkflowPersistService>;
   let workflowCoverService: Mocked<WorkflowCoverService>;
   let datasetService: Mocked<DatasetService>;
+  let modelService: Mocked<ModelService>;
 
   beforeEach(async () => {
     const workflowPersistServiceSpy = { updateWorkflowName: vi.fn(), updateWorkflowDescription: vi.fn() };
@@ -93,6 +113,12 @@ describe("CardItemComponent", () => {
       clearCover: vi.fn().mockReturnValue(of(undefined)),
     };
     const datasetServiceSpy = { getDatasetCoverUrl: vi.fn(), updateDatasetName: vi.fn() };
+    const modelServiceSpy = {
+      updateModelName: vi.fn(),
+      updateModelDescription: vi.fn(),
+      retrieveOwners: vi.fn().mockReturnValue(of([])),
+      getModelCoverUrl: vi.fn().mockReturnValue(of({ url: null })),
+    };
 
     await TestBed.configureTestingModule({
       imports: [CardItemComponent, HttpClientTestingModule, BrowserAnimationsModule, RouterTestingModule],
@@ -100,6 +126,7 @@ describe("CardItemComponent", () => {
         { provide: WorkflowPersistService, useValue: workflowPersistServiceSpy },
         { provide: WorkflowCoverService, useValue: workflowCoverServiceSpy },
         { provide: DatasetService, useValue: datasetServiceSpy },
+        { provide: ModelService, useValue: modelServiceSpy },
         { provide: UserService, useClass: StubUserService },
         NzModalService,
         ...commonTestProviders,
@@ -111,6 +138,7 @@ describe("CardItemComponent", () => {
     workflowPersistService = TestBed.inject(WorkflowPersistService) as unknown as Mocked<WorkflowPersistService>;
     workflowCoverService = TestBed.inject(WorkflowCoverService) as unknown as Mocked<WorkflowCoverService>;
     datasetService = TestBed.inject(DatasetService) as unknown as Mocked<DatasetService>;
+    modelService = TestBed.inject(ModelService) as unknown as Mocked<ModelService>;
     component.entry = makeWorkflowEntry();
     fixture.detectChanges();
   });
@@ -705,16 +733,42 @@ describe("CardItemComponent", () => {
       expect(downloadDatasetSpy).toHaveBeenCalledWith(5, "mydataset");
     });
 
+    it("onClickDownload downloads a model via the download service", () => {
+      const downloadService = TestBed.inject(DownloadService);
+      const downloadModelSpy = vi.spyOn(downloadService, "downloadModel").mockReturnValue(of(new Blob()));
+      component.entry = makeModelEntry({ id: 9, name: "my-model" });
+
+      component.onClickDownload();
+
+      expect(downloadModelSpy).toHaveBeenCalledWith(9, "my-model");
+    });
+
     it("onClickDownload is a no-op when the entry has no id", () => {
       const downloadService = TestBed.inject(DownloadService);
       const downloadWorkflowSpy = vi.spyOn(downloadService, "downloadWorkflow");
       const downloadDatasetSpy = vi.spyOn(downloadService, "downloadDataset");
+      const downloadModelSpy = vi.spyOn(downloadService, "downloadModel");
       component.entry = makeWorkflowEntry({ id: undefined });
 
       component.onClickDownload();
 
       expect(downloadWorkflowSpy).not.toHaveBeenCalled();
       expect(downloadDatasetSpy).not.toHaveBeenCalled();
+      expect(downloadModelSpy).not.toHaveBeenCalled();
+    });
+
+    it("onClickDownload is a no-op for a project entry", () => {
+      const downloadService = TestBed.inject(DownloadService);
+      const downloadWorkflowSpy = vi.spyOn(downloadService, "downloadWorkflow");
+      const downloadDatasetSpy = vi.spyOn(downloadService, "downloadDataset");
+      const downloadModelSpy = vi.spyOn(downloadService, "downloadModel");
+      component.entry = makeWorkflowEntry({ id: 3, type: "project" } as any);
+
+      component.onClickDownload();
+
+      expect(downloadWorkflowSpy).not.toHaveBeenCalled();
+      expect(downloadDatasetSpy).not.toHaveBeenCalled();
+      expect(downloadModelSpy).not.toHaveBeenCalled();
     });
 
     it("onClickOpenShareAccess opens the workflow share modal and forwards refresh events", async () => {
@@ -892,6 +946,156 @@ describe("CardItemComponent", () => {
 
       expect(component.isLiked).toBe(false);
       expect(component.likeCount).toBe(0);
+    });
+  });
+
+  describe("model entries", () => {
+    it("links an accessible model to the user model page, uses the flask icon, and carries the size", () => {
+      component.currentUid = 1;
+      component.entry = makeModelEntry({ id: 9, size: 4096, accessibleUserIds: [1] } as any);
+
+      component.initializeEntry();
+
+      expect(component.entryLink).toEqual([USER_MODEL, "9"]);
+      expect(component.iconType).toBe("experiment");
+      expect(component.size).toBe(4096);
+      expect(component.disableDelete).toBe(false);
+    });
+
+    it("links a non-owned model to the hub model detail page", () => {
+      component.currentUid = 1;
+      component.entry = makeModelEntry({ id: 10, accessibleUserIds: [999] } as any);
+
+      component.initializeEntry();
+
+      expect(component.entryLink).toEqual([HUB_MODEL_RESULT_DETAIL, "10"]);
+    });
+
+    it("links a model to the hub detail page for an anonymous visitor", () => {
+      component.currentUid = undefined;
+      component.entry = makeModelEntry({ id: 10, accessibleUserIds: [] } as any);
+
+      component.initializeEntry();
+
+      expect(component.entryLink).toEqual([HUB_MODEL_RESULT_DETAIL, "10"]);
+    });
+
+    it("disables delete for a model the user does not own", () => {
+      component.entry = makeModelEntry({ id: 11, model: { isOwner: false } } as any);
+
+      component.initializeEntry();
+
+      expect(component.disableDelete).toBe(true);
+    });
+
+    it("loads the model cover from the model endpoint, not the dataset one", () => {
+      modelService.getModelCoverUrl.mockReturnValue(of({ url: "https://example/model-cover.png" }));
+      component.entry = makeModelEntry({ id: 12, coverImageUrl: "v1/cover.png" } as any);
+
+      component.initializeEntry();
+
+      expect(modelService.getModelCoverUrl).toHaveBeenCalledWith(12);
+      expect(datasetService.getDatasetCoverUrl).not.toHaveBeenCalled();
+      expect(component.coverImageSrc).toBe("https://example/model-cover.png");
+    });
+
+    it("keeps the placeholder for a model with no cover image", () => {
+      component.entry = makeModelEntry({ id: 12, coverImageUrl: undefined } as any);
+
+      component.initializeEntry();
+
+      expect(modelService.getModelCoverUrl).not.toHaveBeenCalled();
+      expect(component.coverImageSrc).toBe(CardItemComponent.DEFAULT_PREVIEW_IMAGE);
+    });
+
+    it("falls back to the placeholder when the model cover request fails", () => {
+      modelService.getModelCoverUrl.mockReturnValue(throwError(() => new Error("boom")));
+      component.entry = makeModelEntry({ id: 12, coverImageUrl: "v1/cover.png" } as any);
+
+      component.initializeEntry();
+
+      expect(component.coverImageSrc).toBe(CardItemComponent.DEFAULT_PREVIEW_IMAGE);
+    });
+
+    it("opens the share modal against the model access resource", async () => {
+      const modalService = TestBed.inject(NzModalService);
+      const createSpy = vi
+        .spyOn(modalService, "create")
+        .mockReturnValue({ componentInstance: { refresh: new Subject<void>() } } as any);
+      modelService.retrieveOwners.mockReturnValue(of(["carol@test.com"]));
+      component.entry = makeModelEntry({ id: 13, accessLevel: "WRITE" } as any);
+
+      await component.onClickOpenShareAccess();
+
+      const cfg = createSpy.mock.calls[0][0];
+      expect(cfg.nzData).toEqual({
+        writeAccess: true,
+        type: "model",
+        id: 13,
+        allOwners: ["carol@test.com"],
+      });
+      expect(cfg.nzTitle).toBe("Share this model with others");
+    });
+
+    it("renames a model through the model service", () => {
+      component.entry = makeModelEntry({ id: 14, name: "new-valid-name" });
+      component.originalName = "old-name";
+      modelService.updateModelName.mockReturnValue(of({} as any));
+
+      component.confirmUpdateCustomName("new-valid-name");
+
+      expect(modelService.updateModelName).toHaveBeenCalledWith(14, "new-valid-name");
+      expect(datasetService.updateDatasetName).not.toHaveBeenCalled();
+    });
+
+    it("rejects an invalid model name, reverts it, and exits editing", () => {
+      component.entry = makeModelEntry({ id: 15, name: "invalid name" });
+      component.originalName = "original-name";
+      component.editingName = true;
+      const errorSpy = vi.spyOn(TestBed.inject(NotificationService), "error");
+
+      component.confirmUpdateCustomName("invalid name");
+
+      expect(modelService.updateModelName).not.toHaveBeenCalled();
+      expect(errorSpy).toHaveBeenCalled();
+      expect(component.entry.name).toBe("original-name");
+      expect(component.editingName).toBe(false);
+    });
+
+    it("falls back to the default model name when the name is cleared", () => {
+      component.entry = makeModelEntry({ id: 16, name: "" });
+      component.originalName = "old-name";
+      modelService.updateModelName.mockReturnValue(of({} as any));
+
+      component.confirmUpdateCustomName("");
+
+      expect(modelService.updateModelName).toHaveBeenCalledWith(16, DEFAULT_MODEL_NAME);
+    });
+
+    it("updates a model description through the model service", () => {
+      // entry.description already holds the edited text — ngModel writes it before the
+      // confirm handler runs — and differs from originalDescription, so the no-op guard
+      // at the top of confirmUpdateCustomDescription does not fire.
+      component.entry = makeModelEntry({ id: 17, description: "current" });
+      component.originalDescription = "old";
+      modelService.updateModelDescription.mockReturnValue(of({} as any));
+
+      component.confirmUpdateCustomDescription("new description");
+
+      expect(modelService.updateModelDescription).toHaveBeenCalledWith(17, "new description");
+      expect(component.entry.description).toBe("new description");
+      expect(component.editingDescription).toBe(false);
+    });
+
+    it("skips the update when the description has not changed", () => {
+      component.entry = makeModelEntry({ id: 18, description: "same" });
+      component.originalDescription = "same";
+      component.editingDescription = true;
+
+      component.confirmUpdateCustomDescription("same");
+
+      expect(modelService.updateModelDescription).not.toHaveBeenCalled();
+      expect(component.editingDescription).toBe(false);
     });
   });
 });

@@ -37,6 +37,7 @@ import { SearchService } from "../../../dashboard/service/user/search.service";
 import { commonTestProviders } from "../../../common/testing/test-utils";
 
 const VIEW_MODE_STORAGE_KEY = "texera.hub.dataset.viewMode";
+const MODEL_VIEW_MODE_STORAGE_KEY = "texera.hub.model.viewMode";
 
 /**
  * Minimal same-selector stubs that replace the heavy real children in the
@@ -63,6 +64,7 @@ class StubSortButtonComponent {
   providers: [{ provide: FiltersComponent, useExisting: forwardRef(() => StubFiltersComponent) }],
 })
 class StubFiltersComponent {
+  @Input() resourceType: "workflow" | "dataset" | "model" = "workflow";
   masterFilterList: ReadonlyArray<string> = [];
   masterFilterListChange = new Subject<ReadonlyArray<string>>();
   getSearchKeywords = vi.fn(() => [] as string[]);
@@ -194,6 +196,13 @@ describe("HubSearchResultComponent", () => {
       expect(component.sortMethod).toBe(SortMethod.EditTimeDesc);
     });
 
+    it("resolves 'model' and defaults to CreateTimeDesc when the url contains 'model'", () => {
+      // Models carry no last-modified time, so EditTimeDesc would sort on a null key.
+      build("/hub/model/result");
+      expect(component.searchType).toBe("model");
+      expect(component.sortMethod).toBe(SortMethod.CreateTimeDesc);
+    });
+
     it("keeps the default 'workflow' searchType when the url matches neither branch", () => {
       build("/dashboard/project");
       expect(component.searchType).toBe("workflow");
@@ -217,6 +226,27 @@ describe("HubSearchResultComponent", () => {
     it("falls back to 'list' when localStorage is empty", () => {
       build("/dashboard/dataset");
       expect(component.viewMode).toBe("list");
+    });
+  });
+
+  describe("viewMode is keyed per resource type", () => {
+    it("does not let a dataset preference leak into the model page", () => {
+      localStorage.setItem(VIEW_MODE_STORAGE_KEY, "card");
+      build("/hub/model/result");
+      expect(component.viewMode).toBe("list");
+    });
+
+    it("reads the model-specific key on the model page", () => {
+      localStorage.setItem(MODEL_VIEW_MODE_STORAGE_KEY, "card");
+      build("/hub/model/result");
+      expect(component.viewMode).toBe("card");
+    });
+
+    it("persists under the model key when set from the model page", () => {
+      build("/hub/model/result");
+      setItemSpy.mockClear();
+      component.setViewMode("card");
+      expect(setItemSpy).toHaveBeenCalledWith(MODEL_VIEW_MODE_STORAGE_KEY, "card");
     });
   });
 
@@ -250,6 +280,13 @@ describe("HubSearchResultComponent", () => {
       const host = fixture.nativeElement as HTMLElement;
       expect(host.querySelector(".view-toggle")).not.toBeNull();
       expect(host.querySelector("texera-search-results")).not.toBeNull();
+      expect(host.querySelector("texera-filters")).not.toBeNull();
+    });
+
+    it("renders the view-toggle and filters when searchType is 'model'", () => {
+      build("/hub/model/result");
+      const host = fixture.nativeElement as HTMLElement;
+      expect(host.querySelector(".view-toggle")).not.toBeNull();
       expect(host.querySelector("texera-filters")).not.toBeNull();
     });
 

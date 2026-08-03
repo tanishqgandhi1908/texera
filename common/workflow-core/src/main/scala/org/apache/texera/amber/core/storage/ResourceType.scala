@@ -17,12 +17,15 @@
  * under the License.
  */
 
-package org.apache.texera.amber.core.storage.model
+package org.apache.texera.amber.core.storage
 
-trait OnDataset {
-  def getRepositoryName(): String
-
-  def getVersionHash(): String
-
-  def getFileRelativePath(): String
+/**
+  * The leading segment of a logical file path, identifying which resource kind (and thus which
+  * backing table) a path belongs to.
+  *
+  * Path shape: /<prefix>/ownerEmail/resourceName/versionName/fileRelativePath
+  */
+object ResourceType extends Enumeration {
+  val Datasets: Value = Value("datasets")
+  val Models: Value = Value("models")
 }

@@ -57,13 +57,16 @@ import {
   DEFAULT_DATASET_NAME,
   validateDatasetName,
 } from "../../../../service/user/dataset/dataset.service";
+import { DEFAULT_MODEL_NAME, ModelService, validateModelName } from "../../../../service/user/model/model.service";
 import { NotificationService } from "../../../../../common/service/notification/notification.service";
 import { extractErrorMessage } from "../../../../../common/util/error";
 import { WorkflowCoverService } from "../../../../service/user/workflow-cover/workflow-cover.service";
 import {
   HUB_DATASET_RESULT_DETAIL,
+  HUB_MODEL_RESULT_DETAIL,
   HUB_WORKFLOW_RESULT_DETAIL,
   USER_DATASET,
+  USER_MODEL,
   USER_PROJECT,
   USER_WORKSPACE,
 } from "../../../../../app-routing.constant";
@@ -137,6 +140,7 @@ export class CardItemComponent implements OnChanges {
     private modalService: NzModalService,
     private workflowPersistService: WorkflowPersistService,
     private datasetService: DatasetService,
+    private modelService: ModelService,
     private modal: NzModalService,
     private hubService: HubService,
     private downloadService: DownloadService,
@@ -231,6 +235,19 @@ export class CardItemComponent implements OnChanges {
         this.size = this.entry.size;
         this.loadDatasetCover(this.entry.id);
       }
+    } else if (this.entry.type === "model") {
+      if (typeof this.entry.id === "number") {
+        this.disableDelete = !this.entry.model.isOwner;
+        this.owners = this.entry.accessibleUserIds;
+        if (this.currentUid !== undefined && this.owners.includes(this.currentUid)) {
+          this.entryLink = [USER_MODEL, String(this.entry.id)];
+        } else {
+          this.entryLink = [HUB_MODEL_RESULT_DETAIL, String(this.entry.id)];
+        }
+        this.iconType = "experiment";
+        this.size = this.entry.size;
+        this.loadModelCover(this.entry.id);
+      }
     } else if (this.entry.type === "file") {
       // not sure where to redirect
       this.iconType = "folder-open";
@@ -255,6 +272,26 @@ export class CardItemComponent implements OnChanges {
     }
     this.datasetService
       .getDatasetCoverUrl(did)
+      .pipe(untilDestroyed(this))
+      .subscribe({
+        next: ({ url }) => {
+          this.coverImageSrc = url ?? CardItemComponent.DEFAULT_PREVIEW_IMAGE;
+          this.cdr.markForCheck();
+        },
+        error: () => {
+          this.coverImageSrc = CardItemComponent.DEFAULT_PREVIEW_IMAGE;
+          this.cdr.markForCheck();
+        },
+      });
+  }
+
+  /** Loads the model cover into the preview slot, falling back to the placeholder. */
+  private loadModelCover(mid: number): void {
+    if (!this.entry.coverImageUrl) {
+      return;
+    }
+    this.modelService
+      .getModelCoverUrl(mid)
       .pipe(untilDestroyed(this))
       .subscribe({
         next: ({ url }) => {
@@ -311,6 +348,20 @@ export class CardItemComponent implements OnChanges {
         nzCentered: true,
         nzWidth: "700px",
       });
+    } else if (this.entry.type === "model") {
+      modal = this.modalService.create({
+        nzContent: ShareAccessComponent,
+        nzData: {
+          writeAccess: this.entry.accessLevel === "WRITE",
+          type: "model",
+          id: this.entry.id,
+          allOwners: await firstValueFrom(this.modelService.retrieveOwners()),
+        },
+        nzFooter: null,
+        nzTitle: "Share this model with others",
+        nzCentered: true,
+        nzWidth: "700px",
+      });
     }
     if (modal) {
       modal.componentInstance?.refresh.pipe(untilDestroyed(this)).subscribe(() => {
@@ -329,6 +380,8 @@ export class CardItemComponent implements OnChanges {
         .subscribe();
     } else if (this.entry.type === "dataset") {
       this.downloadService.downloadDataset(this.entry.id, this.entry.name).pipe(untilDestroyed(this)).subscribe();
+    } else if (this.entry.type === "model") {
+      this.downloadService.downloadModel(this.entry.id, this.entry.name).pipe(untilDestroyed(this)).subscribe();
     }
   };
 
@@ -399,10 +452,10 @@ export class CardItemComponent implements OnChanges {
       this.editingName = false;
       return;
     }
-    const newName = this.entry.type === "workflow" ? name || DEFAULT_WORKFLOW_NAME : name || DEFAULT_DATASET_NAME;
+    const newName = name || this.defaultNameForType();
 
-    if (this.entry.type === "dataset") {
-      const nameError = validateDatasetName(newName);
+    if (this.entry.type === "dataset" || this.entry.type === "model") {
+      const nameError = this.entry.type === "model" ? validateModelName(newName) : validateDatasetName(newName);
       if (nameError) {
         this.notificationService.error(nameError);
         this.entry.name = this.originalName;
@@ -425,6 +478,26 @@ export class CardItemComponent implements OnChanges {
         newName,
         this.originalName
       );
+    } else if (this.entry.type === "model") {
+      this.updateProperty(
+        this.modelService.updateModelName.bind(this.modelService),
+        "name",
+        newName,
+        this.originalName
+      );
+    }
+  }
+
+  private defaultNameForType(): string {
+    switch (this.entry.type) {
+      case "workflow":
+        return DEFAULT_WORKFLOW_NAME;
+      case "dataset":
+        return DEFAULT_DATASET_NAME;
+      case "model":
+        return DEFAULT_MODEL_NAME;
+      default:
+        return this.entry.name;
     }
   }
 
@@ -445,6 +518,13 @@ export class CardItemComponent implements OnChanges {
     } else if (this.entry.type === "dataset") {
       this.updateProperty(
         this.datasetService.updateDatasetDescription.bind(this.datasetService),
+        "description",
+        updatedDescription,
+        this.originalDescription
+      );
+    } else if (this.entry.type === "model") {
+      this.updateProperty(
+        this.modelService.updateModelDescription.bind(this.modelService),
         "description",
         updatedDescription,
         this.originalDescription

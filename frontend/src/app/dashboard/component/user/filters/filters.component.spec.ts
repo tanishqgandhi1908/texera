@@ -25,6 +25,8 @@ import { StubOperatorMetadataService } from "src/app/workspace/service/operator-
 import { OperatorMetadataService } from "src/app/workspace/service/operator-metadata/operator-metadata.service";
 import { WorkflowPersistService } from "src/app/common/service/workflow-persist/workflow-persist.service";
 import { StubWorkflowPersistService } from "src/app/common/service/workflow-persist/stub-workflow-persist.service";
+import { DatasetService } from "../../../service/user/dataset/dataset.service";
+import { ModelService } from "../../../service/user/model/model.service";
 import { testUserProjects, testWorkflowEntries } from "../../user-dashboard-test-fixtures";
 import { NzDropDownModule } from "ng-zorro-antd/dropdown";
 import { JWT_OPTIONS, JwtHelperService } from "@auth0/angular-jwt";
@@ -38,6 +40,7 @@ import { MOCK_USER, StubUserService } from "src/app/common/service/user/stub-use
 import { UserProjectService } from "src/app/dashboard/service/user/project/user-project.service";
 import { StubUserProjectService } from "src/app/dashboard/service/user/project/stub-user-project.service";
 import { NotificationService } from "src/app/common/service/notification/notification.service";
+import { of } from "rxjs";
 
 describe("FiltersComponent", () => {
   let component: FiltersComponent;
@@ -63,6 +66,8 @@ describe("FiltersComponent", () => {
         JwtHelperService,
         { provide: JWT_OPTIONS, useValue: {} },
         { provide: WorkflowPersistService, useValue: new StubWorkflowPersistService(testWorkflowEntries) },
+        { provide: DatasetService, useValue: { retrieveOwners: () => of(["ds-owner@test.com"]) } },
+        { provide: ModelService, useValue: { retrieveOwners: () => of(["model-owner@test.com"]) } },
         { provide: OperatorMetadataService, useClass: StubOperatorMetadataService },
         { provide: UserService, useClass: StubUserService },
         { provide: UserProjectService, useClass: StubUserProjectService },
@@ -128,6 +133,37 @@ describe("FiltersComponent", () => {
     it("populates workflow ids from retrieveWorkflowIDs on init", () => {
       expect(component.wids.map(w => w.id)).toEqual(["1", "2", "3", "4", "5"]);
       expect(component.wids.every(w => !w.checked)).toBe(true);
+    });
+
+    it("defaults to workflow owners, keeping existing callers unaffected", () => {
+      // The @Input defaults to "workflow", so every pre-existing call site
+      // (which passes no resourceType) must behave exactly as before.
+      expect(component.resourceType).toBe("workflow");
+      expect(component.owners.map(o => o.userName)).toEqual(["Texera", "Angular", "UCI"]);
+    });
+
+    it("sources owners from DatasetService when resourceType is dataset", () => {
+      const f = TestBed.createComponent(FiltersComponent);
+      f.componentInstance.resourceType = "dataset";
+      f.detectChanges();
+      expect(f.componentInstance.owners.map(o => o.userName)).toEqual(["ds-owner@test.com"]);
+      f.destroy();
+    });
+
+    it("sources owners from ModelService when resourceType is model", () => {
+      const f = TestBed.createComponent(FiltersComponent);
+      f.componentInstance.resourceType = "model";
+      f.detectChanges();
+      expect(f.componentInstance.owners.map(o => o.userName)).toEqual(["model-owner@test.com"]);
+      f.destroy();
+    });
+
+    it("does not retrieve workflow ids for a non-workflow resource type", () => {
+      const f = TestBed.createComponent(FiltersComponent);
+      f.componentInstance.resourceType = "model";
+      f.detectChanges();
+      expect(f.componentInstance.wids).toEqual([]);
+      f.destroy();
     });
 
     it("skips owner and id retrieval when the user is not logged in at init", () => {

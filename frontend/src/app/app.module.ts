@@ -150,6 +150,10 @@ import { en_US, provideNzI18n } from "ng-zorro-antd/i18n";
 import { FilesUploaderComponent } from "./dashboard/component/user/files-uploader/files-uploader.component";
 import { ConflictingFileModalContentComponent } from "./dashboard/component/user/files-uploader/conflicting-file-modal-content/conflicting-file-modal-content.component";
 import { UserDatasetComponent } from "./dashboard/component/user/user-dataset/user-dataset.component";
+import { UserModelComponent } from "./dashboard/component/user/user-model/user-model.component";
+import { ModelDetailComponent } from "./dashboard/component/user/user-model/user-model-explorer/model-detail.component";
+import { UserModelCreatorComponent } from "./dashboard/component/user/user-model/user-model-creator/user-model-creator.component";
+import { UserModelStagedObjectsListComponent } from "./dashboard/component/user/user-model/user-model-explorer/user-model-staged-objects-list/user-model-staged-objects-list.component";
 import { UserDatasetVersionCreatorComponent } from "./dashboard/component/user/user-dataset/user-dataset-explorer/user-dataset-version-creator/user-dataset-version-creator.component";
 import { DatasetDetailComponent } from "./dashboard/component/user/user-dataset/user-dataset-explorer/dataset-detail.component";
 import { UserDatasetVersionFiletreeComponent } from "./dashboard/component/user/user-dataset/user-dataset-explorer/user-dataset-version-filetree/user-dataset-version-filetree.component";
@@ -320,6 +324,10 @@ registerLocaleData(en);
     FilesUploaderComponent,
     ConflictingFileModalContentComponent,
     UserDatasetComponent,
+    UserModelComponent,
+    ModelDetailComponent,
+    UserModelCreatorComponent,
+    UserModelStagedObjectsListComponent,
     UserDatasetVersionCreatorComponent,
     DatasetDetailComponent,
     UserDatasetVersionFiletreeComponent,

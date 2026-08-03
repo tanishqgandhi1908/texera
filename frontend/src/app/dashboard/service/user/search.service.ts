@@ -73,7 +73,7 @@ export class SearchService {
     params: SearchFilterParameters,
     start: number,
     count: number,
-    type: "workflow" | "project" | "file" | "dataset" | null,
+    type: "workflow" | "project" | "file" | "dataset" | "model" | null,
     orderBy: SortMethod,
     isLogin: boolean,
     includePublic: boolean = false
@@ -125,7 +125,7 @@ export class SearchService {
     params: SearchFilterParameters,
     start: number,
     count: number,
-    type: "workflow" | "project" | "dataset" | "file" | null,
+    type: "workflow" | "project" | "dataset" | "file" | "model" | null,
     orderBy: SortMethod,
     isLogin: boolean,
     includePublic: boolean
@@ -173,6 +173,7 @@ export class SearchService {
       if (i.project) userIds.add(i.project.ownerId);
       else if (i.workflow) userIds.add(i.workflow.ownerId);
       else if (i.dataset?.dataset?.ownerUid != null) userIds.add(i.dataset.dataset.ownerUid);
+      else if (i.model?.model?.ownerUid != null) userIds.add(i.model.model.ownerUid);
     });
     const userInfo$ = userIds.size ? this.getUserInfo(Array.from(userIds)) : of({} as Record<number, UserInfo>);
 
@@ -188,6 +189,9 @@ export class SearchService {
       } else if (i.dataset?.dataset?.did != null) {
         entityTypes.push(EntityType.Dataset);
         entityIds.push(i.dataset.dataset.did);
+      } else if (i.model?.model?.mid != null) {
+        entityTypes.push(EntityType.Model);
+        entityIds.push(i.model.model.mid);
       }
     });
 
@@ -224,14 +228,18 @@ export class SearchService {
             ? new DashboardEntry(i.workflow)
             : i.project
               ? new DashboardEntry(i.project)
-              : new DashboardEntry(i.dataset!);
+              : i.dataset
+                ? new DashboardEntry(i.dataset)
+                : new DashboardEntry(i.model!);
 
           const key = `${entry.type}:${entry.id}`;
           const ownerId = i.workflow
             ? i.workflow.ownerId
             : i.project
               ? i.project.ownerId
-              : i.dataset!.dataset!.ownerUid!;
+              : i.dataset
+                ? i.dataset.dataset!.ownerUid!
+                : i.model!.model!.ownerUid!;
           const ui = (userMap as any)[ownerId];
           if (ui) {
             entry.setOwnerName(ui.userName);

@@ -48,10 +48,18 @@ object EntityTables {
       override val idColumn: TableField[DatasetRecord, Integer] = DATASET.DID
     }
 
+    case object ModelTable extends BaseEntityTable {
+      override type R = ModelRecord
+      override val table: Table[ModelRecord] = MODEL
+      override val isPublicColumn: TableField[ModelRecord, java.lang.Boolean] = MODEL.IS_PUBLIC
+      override val idColumn: TableField[ModelRecord, Integer] = MODEL.MID
+    }
+
     def apply(entityType: EntityType): BaseEntityTable =
       entityType match {
         case EntityType.Workflow => WorkflowTable
         case EntityType.Dataset  => DatasetTable
+        case EntityType.Model    => ModelTable
       }
   }
 
@@ -83,10 +91,18 @@ object EntityTables {
       override val idColumn: TableField[DatasetUserLikesRecord, Integer] = DATASET_USER_LIKES.DID
     }
 
+    case object ModelLikeTable extends LikeTable {
+      override type R = ModelUserLikesRecord
+      override val table: Table[ModelUserLikesRecord] = MODEL_USER_LIKES
+      override val uidColumn: TableField[ModelUserLikesRecord, Integer] = MODEL_USER_LIKES.UID
+      override val idColumn: TableField[ModelUserLikesRecord, Integer] = MODEL_USER_LIKES.MID
+    }
+
     def apply(entityType: EntityType): LikeTable =
       entityType match {
         case EntityType.Workflow => WorkflowLikeTable
         case EntityType.Dataset  => DatasetLikeTable
+        case EntityType.Model    => ModelLikeTable
       }
   }
 
@@ -104,10 +120,15 @@ object EntityTables {
     }
 
     def apply(entityType: EntityType): CloneTable =
+      get(entityType).getOrElse(
+        throw new IllegalArgumentException(s"Unsupported entity type: $entityType for clone")
+      )
+
+    // Total counterpart to apply, for callers that skip clone rather than fail on it.
+    def get(entityType: EntityType): Option[CloneTable] =
       entityType match {
-        case EntityType.Workflow => WorkflowCloneTable
-        case _ =>
-          throw new IllegalArgumentException(s"Unsupported entity type: $entityType for clone")
+        case EntityType.Workflow => Some(WorkflowCloneTable)
+        case _                   => None
       }
   }
 
@@ -136,10 +157,19 @@ object EntityTables {
         DATASET_VIEW_COUNT.VIEW_COUNT
     }
 
+    case object ModelViewCountTable extends ViewCountTable {
+      override type R = ModelViewCountRecord
+      override val table: Table[ModelViewCountRecord] = MODEL_VIEW_COUNT
+      override val idColumn: TableField[ModelViewCountRecord, Integer] = MODEL_VIEW_COUNT.MID
+      override val viewCountColumn: TableField[ModelViewCountRecord, Integer] =
+        MODEL_VIEW_COUNT.VIEW_COUNT
+    }
+
     def apply(entityType: EntityType): ViewCountTable =
       entityType match {
         case EntityType.Workflow => WorkflowViewCountTable
         case EntityType.Dataset  => DatasetViewCountTable
+        case EntityType.Model    => ModelViewCountTable
       }
   }
 }

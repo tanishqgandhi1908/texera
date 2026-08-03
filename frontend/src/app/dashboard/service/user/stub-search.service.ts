@@ -19,9 +19,10 @@
 
 import { Injectable } from "@angular/core";
 import { Observable, of } from "rxjs";
-import { SearchResult } from "../../type/search-result";
+import { SearchResult, SearchResultItem } from "../../type/search-result";
 import { SearchFilterParameters, searchTestEntries } from "../../type/search-filter-parameters";
 import { DashboardEntry, UserInfo } from "../../type/dashboard-entry";
+import { EntityType } from "../../../hub/service/hub.service";
 import { SortMethod } from "../../type/sort-method";
 import { map } from "rxjs/operators";
 
@@ -43,7 +44,7 @@ export class StubSearchService {
     params: SearchFilterParameters,
     start: number,
     count: number,
-    type: "workflow" | "project" | "file" | "dataset" | null,
+    type: "workflow" | "project" | "file" | "dataset" | "model" | null,
     orderBy: SortMethod,
     isLogin: boolean = true,
     includePublic: boolean = false
@@ -52,9 +53,10 @@ export class StubSearchService {
     return new Observable(observer => {
       observer.next({
         results: searchTestEntries(keywords, params, this.testEntries, type).map(i => ({
-          resourceType: i.type,
+          resourceType: i.type as SearchResultItem["resourceType"],
           workflow: i.type === "workflow" ? i.workflow : undefined,
           project: i.type === "project" ? i.project : undefined,
+          model: i.type === "model" ? i.model : undefined,
         })),
         more: false,
       });
@@ -80,7 +82,7 @@ export class StubSearchService {
     params: SearchFilterParameters,
     start: number,
     count: number,
-    type: "workflow" | "project" | "dataset" | "file" | null,
+    type: "workflow" | "project" | "dataset" | "file" | "model" | null,
     orderBy: SortMethod,
     isLogin: boolean,
     includePublic: boolean
@@ -97,6 +99,7 @@ export class StubSearchService {
               if (i.workflow && e.type === "workflow" && e.workflow === i.workflow) return true;
               if (i.project && e.type === "project" && e.project === i.project) return true;
               if (i.dataset && e.type === "dataset" && e.dataset === i.dataset) return true;
+              if (i.model && e.type === "model" && e.model === i.model) return true;
               return false;
             })!
         );

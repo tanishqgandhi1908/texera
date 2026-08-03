@@ -44,6 +44,7 @@ function makeSidebarTabs(overrides: Partial<SidebarTabs> = {}): SidebarTabs {
     workflows_enabled: false,
     compute_enabled: false,
     datasets_enabled: false,
+    models_enabled: false,
     quota_enabled: false,
     forum_enabled: false,
     about_enabled: false,
@@ -136,6 +137,18 @@ describe("HubComponent", () => {
     const labels = renderedMenuLabels();
     expect(labels.length).toBe(1);
     expect(labels[0]).toContain("Datasets");
+  });
+
+  it("renders only the Models item when models_enabled is the only flag set", () => {
+    setup(false, makeSidebarTabs({ models_enabled: true }));
+    const labels = renderedMenuLabels();
+    expect(labels.length).toBe(1);
+    expect(labels[0]).toContain("Models");
+  });
+
+  it("hides the Models item when models_enabled is off", () => {
+    setup(false, makeSidebarTabs({ home_enabled: true }));
+    expect(renderedMenuLabels().some(l => l.includes("Models"))).toBe(false);
   });
 
   it("renders all three menu items when home, workflow, and dataset flags are enabled", () => {

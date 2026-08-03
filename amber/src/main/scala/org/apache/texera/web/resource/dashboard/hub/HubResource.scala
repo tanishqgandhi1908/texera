@@ -29,18 +29,27 @@ import org.apache.texera.dao.jooq.generated.enums.ActionEnum
 import org.apache.texera.dao.jooq.generated.tables.Dataset.DATASET
 import org.apache.texera.dao.jooq.generated.tables.DatasetUserAccess.DATASET_USER_ACCESS
 import org.apache.texera.dao.jooq.generated.tables.User.USER
-import org.apache.texera.dao.jooq.generated.tables.pojos.{Dataset, DatasetUserAccess}
+import org.apache.texera.dao.jooq.generated.tables.pojos.{
+  Dataset,
+  DatasetUserAccess,
+  Model,
+  ModelUserAccess
+}
 import org.apache.texera.web.resource.dashboard.DashboardResource.DashboardClickableFileEntry
 import org.apache.texera.web.resource.dashboard.hub.ActionType.{Clone, Like, Unlike, View}
 import org.apache.texera.web.resource.dashboard.hub.EntityTables._
 import org.apache.texera.web.resource.dashboard.hub.HubResource._
 import org.apache.texera.web.resource.dashboard.user.dataset.DatasetResource.DashboardDataset
+import org.apache.texera.web.resource.dashboard.user.model.ModelResource.{
+  DashboardModel,
+  repositorySizeOrZero
+}
 import org.apache.texera.web.resource.dashboard.user.workflow.WorkflowResource.{
   DashboardWorkflow,
   baseWorkflowSelect,
   mapWorkflowEntries
 }
-import org.jooq.Table
+import org.jooq.{Table, TableField}
 import org.jooq.impl.DSL
 import org.slf4j.LoggerFactory
 
@@ -336,6 +345,50 @@ object HubResource {
       .toList
       .distinctBy(_.dataset.getDid)
   }
+
+  def fetchDashboardModelsByMids(mids: Seq[Integer], uid: Integer): List[DashboardModel] = {
+    if (mids.isEmpty) {
+      return List.empty[DashboardModel]
+    }
+
+    val records = context
+      .select()
+      .from(
+        MODEL
+          .leftJoin(MODEL_USER_ACCESS)
+          .on(MODEL_USER_ACCESS.MID.eq(MODEL.MID))
+          .leftJoin(USER)
+          .on(USER.UID.eq(MODEL.OWNER_UID))
+      )
+      .where(MODEL.MID.in(mids: _*))
+      .groupBy(
+        MODEL.MID,
+        MODEL.NAME,
+        MODEL.DESCRIPTION,
+        MODEL.OWNER_UID,
+        USER.NAME,
+        MODEL_USER_ACCESS.MID,
+        MODEL_USER_ACCESS.UID,
+        USER.UID
+      )
+      .fetch()
+
+    records.asScala
+      .map { record =>
+        val model = record.into(MODEL).into(classOf[Model])
+        val modelAccess = record.into(MODEL_USER_ACCESS).into(classOf[ModelUserAccess])
+        DashboardModel(
+          isOwner = if (uid == null) false else model.getOwnerUid == uid,
+          model = model,
+          accessPrivilege = modelAccess.getPrivilege,
+          ownerEmail = record.into(USER).getEmail,
+          // 0 on LakeFS failure, matching /model/list — a hub card is never dropped.
+          size = repositorySizeOrZero(model)
+        )
+      }
+      .toList
+      .distinctBy(_.model.getMid)
+  }
 }
 
 @Produces(Array(MediaType.APPLICATION_JSON))
@@ -462,59 +515,79 @@ class HubResource {
 
     val result: Map[String, java.util.List[DashboardClickableFileEntry]] =
       types.map { act =>
-        val (table, idColumn) = act match {
+        // None means the entity type has no table for this action (e.g. clone for
+        // datasets and models), which yields an empty bucket rather than a 500.
+        val tableAndId: Option[(Table[_], TableField[_, Integer])] = act match {
           case ActionType.Like =>
             val lt = LikeTable(entityType)
-            (lt.table, lt.idColumn)
+            Some((lt.table, lt.idColumn))
           case ActionType.Clone =>
-            val ct = CloneTable(entityType)
-            (ct.table, ct.idColumn)
+            CloneTable.get(entityType).map(ct => (ct.table, ct.idColumn))
           case other =>
             throw new BadRequestException(
               s"Unsupported actionType: '$other'. Supported: [like, clone]"
             )
         }
 
-        val topIds: Seq[Integer] = context
-          .select(idColumn)
-          .from(table)
-          .join(baseTable.table)
-          .on(idColumn.eq(baseIdColumn))
-          .where(isPublicColumn.eq(true))
-          .groupBy(idColumn)
-          .orderBy(DSL.count(idColumn).desc())
-          .limit(topN)
-          .fetchInto(classOf[Integer])
-          .asScala
-          .toSeq
-
-        val entries: Seq[DashboardClickableFileEntry] =
-          if (entityType == EntityType.Workflow) {
-            fetchDashboardWorkflowsByWids(topIds, currentUid).map { w =>
-              DashboardClickableFileEntry(
-                resourceType = entityType.value,
-                workflow = Some(w),
-                project = None,
-                dataset = None
-              )
-            }
-          } else if (entityType == EntityType.Dataset) {
-            fetchDashboardDatasetsByDids(topIds, currentUid).map { d =>
-              DashboardClickableFileEntry(
-                resourceType = entityType.value,
-                workflow = None,
-                project = None,
-                dataset = Some(d)
-              )
-            }
-          } else {
-            Seq.empty
-          }
-
-        act.value -> entries.toList.asJava
+        tableAndId match {
+          case None => act.value -> List.empty[DashboardClickableFileEntry].asJava
+          case Some((table, idColumn)) =>
+            act.value -> topEntriesFor(
+              entityType,
+              table,
+              idColumn,
+              baseTable,
+              isPublicColumn,
+              baseIdColumn,
+              topN,
+              currentUid
+            )
+        }
       }.toMap
 
     result.asJava
+  }
+
+  /** Top public entities for one action table, ordered by how often they were acted on. */
+  private def topEntriesFor(
+      entityType: EntityType,
+      table: Table[_],
+      idColumn: TableField[_, Integer],
+      baseTable: BaseEntityTable,
+      isPublicColumn: TableField[_, java.lang.Boolean],
+      baseIdColumn: TableField[_, Integer],
+      topN: Int,
+      currentUid: Integer
+  ): java.util.List[DashboardClickableFileEntry] = {
+    val topIds: Seq[Integer] = context
+      .select(idColumn)
+      .from(table)
+      .join(baseTable.table)
+      .on(idColumn.eq(baseIdColumn))
+      .where(isPublicColumn.eq(true))
+      .groupBy(idColumn)
+      .orderBy(DSL.count(idColumn).desc())
+      .limit(topN)
+      .fetchInto(classOf[Integer])
+      .asScala
+      .toSeq
+
+    val entries: Seq[DashboardClickableFileEntry] = entityType match {
+      case EntityType.Workflow =>
+        fetchDashboardWorkflowsByWids(topIds, currentUid).map { w =>
+          DashboardClickableFileEntry(resourceType = entityType.value, workflow = Some(w))
+        }
+      case EntityType.Dataset =>
+        fetchDashboardDatasetsByDids(topIds, currentUid).map { d =>
+          DashboardClickableFileEntry(resourceType = entityType.value, dataset = Some(d))
+        }
+      case EntityType.Model =>
+        fetchDashboardModelsByMids(topIds, currentUid).map { m =>
+          DashboardClickableFileEntry(resourceType = entityType.value, model = Some(m))
+        }
+    }
+
+    entries.toList.asJava
   }
 
   /**
@@ -620,21 +693,26 @@ class HubResource {
               .toMap
           } else Map.empty
 
+        // Entity types without a clone table simply report no clones.
         val cloneMap: Map[Int, Int] =
-          if (requestedActions.contains(ActionType.Clone) && etype != EntityType.Dataset) {
-            val cloneTbl = CloneTable(etype)
-            context
-              .select(cloneTbl.idColumn, DSL.count().`as`("cnt"))
-              .from(cloneTbl.table)
-              .where(cloneTbl.idColumn.in(ids: _*))
-              .groupBy(cloneTbl.idColumn)
-              .fetch()
-              .asScala
-              .map { r =>
-                r.get(cloneTbl.idColumn).intValue() ->
-                  r.get("cnt", classOf[Integer]).intValue()
+          if (requestedActions.contains(ActionType.Clone)) {
+            CloneTable
+              .get(etype)
+              .map { cloneTbl =>
+                context
+                  .select(cloneTbl.idColumn, DSL.count().`as`("cnt"))
+                  .from(cloneTbl.table)
+                  .where(cloneTbl.idColumn.in(ids: _*))
+                  .groupBy(cloneTbl.idColumn)
+                  .fetch()
+                  .asScala
+                  .map { r =>
+                    r.get(cloneTbl.idColumn).intValue() ->
+                      r.get("cnt", classOf[Integer]).intValue()
+                  }
+                  .toMap
               }
-              .toMap
+              .getOrElse(Map.empty[Int, Int])
           } else Map.empty
 
         reqs.filter(_.entityType == etype).foreach { req =>
@@ -686,6 +764,8 @@ class HubResource {
             (WORKFLOW_USER_ACCESS: Table[_], WORKFLOW_USER_ACCESS.WID, WORKFLOW_USER_ACCESS.UID)
           case EntityType.Dataset =>
             (DATASET_USER_ACCESS: Table[_], DATASET_USER_ACCESS.DID, DATASET_USER_ACCESS.UID)
+          case EntityType.Model =>
+            (MODEL_USER_ACCESS: Table[_], MODEL_USER_ACCESS.MID, MODEL_USER_ACCESS.UID)
         }
 
         val records = context

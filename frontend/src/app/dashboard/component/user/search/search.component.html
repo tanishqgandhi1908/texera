@@ -75,6 +75,17 @@
             nzType="database"></span>
           Dataset
         </button>
+
+        <button
+          nz-button
+          nzType="default"
+          [ngClass]="{'selected': selectedType === 'model'}"
+          (click)="filterByType('model')">
+          <span
+            nz-icon
+            nzType="experiment"></span>
+          Model
+        </button>
       </div>
 
       <texera-filters #filters></texera-filters>

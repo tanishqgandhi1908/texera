@@ -795,7 +795,7 @@ class WorkflowExecutionsResourceSpec
     val content =
       """{
         |  "operators": [
-        |    {"operatorID": "scanA", "operatorProperties": {"fileName": "/owner@example.com/LockedDS/v1/data.csv"}},
+        |    {"operatorID": "scanA", "operatorProperties": {"fileName": "/datasets/owner@example.com/LockedDS/v1/data.csv"}},
         |    {"operatorID": "downstreamB", "operatorProperties": {}}
         |  ],
         |  "links": [
@@ -854,7 +854,7 @@ class WorkflowExecutionsResourceSpec
     val content =
       """{
         |  "operators": [
-        |    {"operatorID": "scan", "operatorProperties": {"fileName": "/test@example.com/MyDS/v1/data.csv"}}
+        |    {"operatorID": "scan", "operatorProperties": {"fileName": "/datasets/test@example.com/MyDS/v1/data.csv"}}
         |  ],
         |  "links": []
         |}""".stripMargin

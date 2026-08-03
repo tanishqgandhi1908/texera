@@ -30,7 +30,7 @@ import { UserService } from "../../../common/service/user/user.service";
 import { StubUserService } from "../../../common/service/user/stub-user.service";
 import { WorkflowPersistService } from "../../../common/service/workflow-persist/workflow-persist.service";
 import { DatasetService } from "../../../dashboard/service/user/dataset/dataset.service";
-import { HOME, HUB_DATASET_RESULT, HUB_WORKFLOW_RESULT } from "../../../app-routing.constant";
+import { HOME, HUB_DATASET_RESULT, HUB_MODEL_RESULT, HUB_WORKFLOW_RESULT } from "../../../app-routing.constant";
 import { commonTestProviders } from "../../../common/testing/test-utils";
 
 describe("LandingPageComponent", () => {
@@ -52,20 +52,26 @@ describe("LandingPageComponent", () => {
   const workflowLikeItems = [{ id: "wf-like-item" }] as any;
   const workflowCloneItems = [{ id: "wf-clone-item" }] as any;
   const datasetLikeItems = [{ id: "ds-like-item" }] as any;
+  const modelLikeItems = [{ id: "model-like-item" }] as any;
   const workflowLikeEnriched = [{ id: "wf-like-enriched" }] as any;
   const workflowCloneEnriched = [{ id: "wf-clone-enriched" }] as any;
   const datasetLikeEnriched = [{ id: "ds-like-enriched" }] as any;
+  const modelLikeEnriched = [{ id: "model-like-enriched" }] as any;
 
   function configureModule() {
     hubServiceStub = {
       getCount: vi.fn((entityType: EntityType) => {
         if (entityType === EntityType.Workflow) return of(42);
         if (entityType === EntityType.Dataset) return of(7);
+        if (entityType === EntityType.Model) return of(3);
         return of(0);
       }),
       getTops: vi.fn((entityType: EntityType, _actions: ActionType[], _uid?: number) => {
         if (entityType === EntityType.Workflow) {
           return of({ [ActionType.Like]: workflowLikeItems, [ActionType.Clone]: workflowCloneItems });
+        }
+        if (entityType === EntityType.Model) {
+          return of({ [ActionType.Like]: modelLikeItems });
         }
         return of({ [ActionType.Like]: datasetLikeItems });
       }),
@@ -76,6 +82,7 @@ describe("LandingPageComponent", () => {
         if (items === workflowLikeItems) return of(workflowLikeEnriched);
         if (items === workflowCloneItems) return of(workflowCloneEnriched);
         if (items === datasetLikeItems) return of(datasetLikeEnriched);
+        if (items === modelLikeItems) return of(modelLikeEnriched);
         return of([]);
       }),
     };
@@ -128,22 +135,24 @@ describe("LandingPageComponent", () => {
     expect(component.currentUid).toBe(99);
   });
 
-  it("ngOnInit invokes getWorkflowCount and loadTops", () => {
+  it("ngOnInit invokes loadCounts and loadTops", () => {
     build();
-    const countSpy = vi.spyOn(component, "getWorkflowCount");
+    const countSpy = vi.spyOn(component, "loadCounts");
     const loadSpy = vi.spyOn(component, "loadTops").mockResolvedValue(undefined as any);
     component.ngOnInit();
     expect(countSpy).toHaveBeenCalledTimes(1);
     expect(loadSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("getWorkflowCount populates workflowCount and datasetCount from HubService.getCount", () => {
+  it("loadCounts populates workflow, dataset and model counts from HubService.getCount", () => {
     build();
-    component.getWorkflowCount();
+    component.loadCounts();
     expect(hubServiceStub.getCount).toHaveBeenCalledWith(EntityType.Workflow);
     expect(hubServiceStub.getCount).toHaveBeenCalledWith(EntityType.Dataset);
+    expect(hubServiceStub.getCount).toHaveBeenCalledWith(EntityType.Model);
     expect(component.workflowCount).toBe(42);
     expect(component.datasetCount).toBe(7);
+    expect(component.modelCount).toBe(3);
   });
 
   it("loadTops resolves workflow Like/Clone and dataset Like buckets", async () => {
@@ -156,10 +165,12 @@ describe("LandingPageComponent", () => {
       component.currentUid
     );
     expect(hubServiceStub.getTops).toHaveBeenCalledWith(EntityType.Dataset, [ActionType.Like], component.currentUid);
+    expect(hubServiceStub.getTops).toHaveBeenCalledWith(EntityType.Model, [ActionType.Like], component.currentUid);
 
     expect(component.topLovedWorkflows).toBe(workflowLikeEnriched);
     expect(component.topClonedWorkflows).toBe(workflowCloneEnriched);
     expect(component.topLovedDatasets).toBe(datasetLikeEnriched);
+    expect(component.topLovedModels).toBe(modelLikeEnriched);
   });
 
   it("loadTops swallows errors and logs them via console.error", async () => {
@@ -172,6 +183,7 @@ describe("LandingPageComponent", () => {
     expect(component.topLovedWorkflows).toEqual([]);
     expect(component.topClonedWorkflows).toEqual([]);
     expect(component.topLovedDatasets).toEqual([]);
+    expect(component.topLovedModels).toEqual([]);
     errorSpy.mockRestore();
   });
 
@@ -199,6 +211,12 @@ describe("LandingPageComponent", () => {
     build();
     component.navigateToSearch("dataset");
     expect(routerNavigateSpy).toHaveBeenCalledWith([HUB_DATASET_RESULT]);
+  });
+
+  it("navigateToSearch routes to the model hub result for 'model'", () => {
+    build();
+    component.navigateToSearch("model");
+    expect(routerNavigateSpy).toHaveBeenCalledWith([HUB_MODEL_RESULT]);
   });
 
   it("navigateToSearch routes to the dashboard home for an unknown type", () => {

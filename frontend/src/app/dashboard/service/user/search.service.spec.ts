@@ -32,6 +32,7 @@ import { SearchResult, SearchResultItem } from "../../type/search-result";
 import { DashboardWorkflow } from "../../type/dashboard-workflow.interface";
 import { DashboardProject } from "../../type/dashboard-project.interface";
 import { DashboardDataset } from "../../type/dashboard-dataset.interface";
+import { DashboardModel } from "../../type/dashboard-model.interface";
 
 const API = "api";
 
@@ -108,6 +109,29 @@ function makeDatasetItem(did: number, ownerUid: number): SearchResultItem {
     },
   };
   return { resourceType: "dataset", dataset };
+}
+
+function makeModelItem(mid: number, ownerUid: number): SearchResultItem {
+  const model: DashboardModel = {
+    isOwner: true,
+    ownerEmail: "o@example.com",
+    accessPrivilege: "WRITE",
+    size: 23,
+    model: {
+      mid,
+      ownerUid,
+      name: `model-${mid}`,
+      repositoryName: `model-${mid}`,
+      isPublic: false,
+      isDownloadable: false,
+      description: "",
+      creationTime: 0,
+      coverImage: undefined,
+      framework: "pytorch",
+      format: "safetensors",
+    },
+  };
+  return { resourceType: "model", model };
 }
 
 describe("SearchService", () => {
@@ -304,6 +328,41 @@ describe("SearchService", () => {
       expect(hubSpy.getUserAccess.mock.calls[0][0]).toEqual([EntityType.Dataset]);
       expect(entry.accessibleUserIds).toEqual([42, 43]);
       expect(entry.ownerName).toBe("carol");
+    });
+
+    it("uses Model entity routing and pulls ownerUid for model items", async () => {
+      const model = makeModelItem(40, 11);
+      const userInfoSpy = vi.spyOn(service, "getUserInfo").mockReturnValue(of({ 11: { userName: "dave" } }));
+      hubSpy.getUserAccess.mockReturnValue(of([{ entityId: 40, entityType: EntityType.Model, userIds: [7] }]));
+
+      const [entry] = await firstValueFrom(service.extendSearchResultsWithHubActivityInfo([model], true));
+
+      expect(userInfoSpy).toHaveBeenCalledWith([11]);
+      expect(hubSpy.getUserAccess.mock.calls[0][0]).toEqual([EntityType.Model]);
+      expect(entry.type).toBe(EntityType.Model);
+      expect(entry.id).toBe(40);
+      expect(entry.accessibleUserIds).toEqual([7]);
+      expect(entry.ownerName).toBe("dave");
+    });
+
+    it("does not request workflow sizes for a model-only result set", async () => {
+      vi.spyOn(service, "getUserInfo").mockReturnValue(of({} as any));
+
+      await firstValueFrom(service.extendSearchResultsWithHubActivityInfo([makeModelItem(41, 11)], true));
+
+      expect(persistSpy.getSizes).not.toHaveBeenCalled();
+    });
+
+    it("keeps each entry on its own type in a mixed workflow/dataset/model batch", async () => {
+      // A model item used to fall through the entry ternary into
+      // `new DashboardEntry(i.dataset!)`, which throws and kills the whole batch.
+      vi.spyOn(service, "getUserInfo").mockReturnValue(of({} as any));
+      const items = [makeWorkflowItem(10, 7), makeDatasetItem(30, 9), makeModelItem(40, 11)];
+
+      const entries = await firstValueFrom(service.extendSearchResultsWithHubActivityInfo(items, true));
+
+      expect(entries.map(e => e.type)).toEqual([EntityType.Workflow, EntityType.Dataset, EntityType.Model]);
+      expect(entries.map(e => e.id)).toEqual([10, 30, 40]);
     });
 
     it("does not request sizes when there are no workflow items", async () => {

@@ -27,9 +27,10 @@ import { GmailService } from "../../../../common/service/gmail/gmail.service";
 import { NZ_MODAL_DATA, NzModalRef, NzModalService } from "ng-zorro-antd/modal";
 import { NotificationService } from "../../../../common/service/notification/notification.service";
 import { HttpErrorResponse } from "@angular/common/http";
-import { USER_DATASET, USER_PROJECT, USER_WORKFLOW } from "../../../../app-routing.constant";
+import { USER_DATASET, USER_MODEL, USER_PROJECT, USER_WORKFLOW } from "../../../../app-routing.constant";
 import { NzMessageService } from "ng-zorro-antd/message";
 import { DatasetService } from "../../../service/user/dataset/dataset.service";
+import { ModelService } from "../../../service/user/model/model.service";
 import { WorkflowPersistService } from "src/app/common/service/workflow-persist/workflow-persist.service";
 import { WorkflowActionService } from "src/app/workspace/service/workflow-graph/model/workflow-action.service";
 import { NgIf, NgFor } from "@angular/common";
@@ -101,6 +102,7 @@ export class ShareAccessComponent implements OnInit, OnDestroy {
     private modalService: NzModalService,
     private workflowPersistService: WorkflowPersistService,
     private datasetService: DatasetService,
+    private modelService: ModelService,
     private workflowActionService: WorkflowActionService,
     private modalRef: NzModalRef
   ) {
@@ -146,6 +148,13 @@ export class ShareAccessComponent implements OnInit, OnDestroy {
         .pipe(untilDestroyed(this))
         .subscribe(dashboardDataset => {
           this.isPublic = dashboardDataset.dataset.isPublic;
+        });
+    } else if (this.type === "model") {
+      this.modelService
+        .getModel(this.id)
+        .pipe(untilDestroyed(this))
+        .subscribe(dashboardModel => {
+          this.isPublic = dashboardModel.model.isPublic;
         });
     }
   }
@@ -194,6 +203,7 @@ export class ShareAccessComponent implements OnInit, OnDestroy {
           let routePath = "";
           if (this.type === "workflow") routePath = USER_WORKFLOW;
           if (this.type === "dataset") routePath = USER_DATASET;
+          if (this.type === "model") routePath = USER_MODEL;
           if (this.type === "project") routePath = USER_PROJECT;
           message += `, access the ${this.type} at ${location.origin}${routePath}/${this.id}`;
         }
@@ -362,6 +372,8 @@ export class ShareAccessComponent implements OnInit, OnDestroy {
                 }
               } else if (this.type === "dataset") {
                 this.publishDataset();
+              } else if (this.type === "model") {
+                this.publishModel();
               }
               modal.close();
             },
@@ -392,6 +404,8 @@ export class ShareAccessComponent implements OnInit, OnDestroy {
                 }
               } else if (this.type === "dataset") {
                 this.unpublishDataset();
+              } else if (this.type === "model") {
+                this.unpublishModel();
               }
               modal.close();
             },
@@ -467,6 +481,44 @@ export class ShareAccessComponent implements OnInit, OnDestroy {
           next: (res: Response) => {
             this.isPublic = false;
             this.notificationService.success("Dataset unpublished successfully");
+          },
+          error: (error: unknown) => {
+            if (error instanceof HttpErrorResponse) {
+              this.notificationService.error(error.error.message);
+            }
+          },
+        });
+    }
+  }
+
+  public publishModel(): void {
+    if (!this.isPublic) {
+      this.modelService
+        .updateModelPublicity(this.id)
+        .pipe(untilDestroyed(this))
+        .subscribe({
+          next: () => {
+            this.isPublic = true;
+            this.notificationService.success("Model published successfully");
+          },
+          error: (error: unknown) => {
+            if (error instanceof HttpErrorResponse) {
+              this.notificationService.error(error.error.message);
+            }
+          },
+        });
+    }
+  }
+
+  public unpublishModel(): void {
+    if (this.isPublic) {
+      this.modelService
+        .updateModelPublicity(this.id)
+        .pipe(untilDestroyed(this))
+        .subscribe({
+          next: () => {
+            this.isPublic = false;
+            this.notificationService.success("Model unpublished successfully");
           },
           error: (error: unknown) => {
             if (error instanceof HttpErrorResponse) {

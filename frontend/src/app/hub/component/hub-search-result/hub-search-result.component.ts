@@ -38,7 +38,8 @@ import { firstValueFrom } from "rxjs";
 import { map } from "rxjs/operators";
 import { SortButtonComponent } from "../../../dashboard/component/user/sort-button/sort-button.component";
 
-const HUB_DATASET_VIEW_MODE_STORAGE_KEY = "texera.hub.dataset.viewMode";
+// Keyed per resource so a dataset preference does not become a model preference.
+const viewModeStorageKey = (searchType: string) => `texera.hub.${searchType}.viewMode`;
 
 @UntilDestroy()
 @Component({
@@ -57,16 +58,15 @@ const HUB_DATASET_VIEW_MODE_STORAGE_KEY = "texera.hub.dataset.viewMode";
   ],
 })
 export class HubSearchResultComponent implements OnInit, AfterViewInit {
-  public searchType: "dataset" | "workflow" = "workflow";
+  public searchType: "dataset" | "workflow" | "model" = "workflow";
   public searchKeywords: string[] = [];
   currentUid = this.userService.getCurrentUser()?.uid;
-  public viewMode: SearchResultsViewMode =
-    localStorage.getItem(HUB_DATASET_VIEW_MODE_STORAGE_KEY) === "card" ? "card" : "list";
+  public viewMode: SearchResultsViewMode = "list";
 
   setViewMode(mode: SearchResultsViewMode): void {
     if (this.viewMode === mode) return;
     this.viewMode = mode;
-    localStorage.setItem(HUB_DATASET_VIEW_MODE_STORAGE_KEY, mode);
+    localStorage.setItem(viewModeStorageKey(this.searchType), mode);
   }
 
   private isLogin = false;
@@ -108,7 +108,11 @@ export class HubSearchResultComponent implements OnInit, AfterViewInit {
 
   ngOnInit() {
     const url = this.router.url;
-    if (url.includes("dataset")) {
+    if (url.includes("model")) {
+      this.searchType = "model";
+      // Models, like datasets, have no last-modified time.
+      this.sortMethod = SortMethod.CreateTimeDesc;
+    } else if (url.includes("dataset")) {
       this.searchType = "dataset";
       // Datasets have no last-modified/execution time, so EditTimeDesc leaves the sort key NULL.
       // Default to CreateTimeDesc so newly created datasets appear first.
@@ -116,6 +120,7 @@ export class HubSearchResultComponent implements OnInit, AfterViewInit {
     } else if (url.includes("workflow")) {
       this.searchType = "workflow";
     }
+    this.viewMode = localStorage.getItem(viewModeStorageKey(this.searchType)) === "card" ? "card" : "list";
   }
 
   ngAfterViewInit() {

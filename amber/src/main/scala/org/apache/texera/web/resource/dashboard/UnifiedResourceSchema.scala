@@ -77,7 +77,14 @@ object UnifiedResourceSchema {
       isDatasetDownloadable: Field[java.lang.Boolean] = DSL.cast(null, classOf[java.lang.Boolean]),
       datasetUserAccess: Field[PrivilegeEnum] = DSL.castNull(classOf[PrivilegeEnum]),
       datasetCoverImage: Field[String] = DSL.cast(null, classOf[String]),
-      workflowCoverImage: Field[String] = DSL.cast(null, classOf[String])
+      workflowCoverImage: Field[String] = DSL.cast(null, classOf[String]),
+      mid: Field[Integer] = DSL.cast(null, classOf[Integer]),
+      isModelPublic: Field[java.lang.Boolean] = DSL.cast(null, classOf[java.lang.Boolean]),
+      isModelDownloadable: Field[java.lang.Boolean] = DSL.cast(null, classOf[java.lang.Boolean]),
+      modelUserAccess: Field[PrivilegeEnum] = DSL.castNull(classOf[PrivilegeEnum]),
+      modelCoverImage: Field[String] = DSL.cast(null, classOf[String]),
+      modelFramework: Field[String] = DSL.cast(null, classOf[String]),
+      modelFormat: Field[String] = DSL.cast(null, classOf[String])
   ): UnifiedResourceSchema = {
     new UnifiedResourceSchema(
       Seq(
@@ -104,7 +111,14 @@ object UnifiedResourceSchema {
         isDatasetDownloadable -> isDatasetDownloadable.as("is_dataset_downloadable"),
         datasetUserAccess -> datasetUserAccess.as("user_dataset_access"),
         datasetCoverImage -> datasetCoverImage.as("cover_image"),
-        workflowCoverImage -> workflowCoverImage.as("workflow_cover_image")
+        workflowCoverImage -> workflowCoverImage.as("workflow_cover_image"),
+        mid -> mid.as("mid"),
+        isModelPublic -> isModelPublic.as("is_model_public"),
+        isModelDownloadable -> isModelDownloadable.as("is_model_downloadable"),
+        modelUserAccess -> modelUserAccess.as("user_model_access"),
+        modelCoverImage -> modelCoverImage.as("model_cover_image"),
+        modelFramework -> modelFramework.as("model_framework"),
+        modelFormat -> modelFormat.as("model_format")
       )
     )
   }
@@ -148,6 +162,15 @@ object UnifiedResourceSchema {
   * - `isDatasetPublic`: Indicates if the dataset is public, as a `Boolean`.
   * - `isDatasetDownloadable`: Indicates if the dataset is downloadable, as a `Boolean`.
   * - `datasetUserAccess`: Access privileges for the dataset, as a `PrivilegeEnum`
+  *
+  * Attributes specific to models:
+  * - `mid`: Model ID, as an `Integer`.
+  * - `isModelPublic`: Indicates if the model is public, as a `Boolean`.
+  * - `isModelDownloadable`: Indicates if the model is downloadable, as a `Boolean`.
+  * - `modelUserAccess`: Access privileges for the model, as a `PrivilegeEnum`.
+  * - `modelCoverImage`: Cover image path of the model, as a `String`.
+  * - `modelFramework` / `modelFormat`: The model's framework and serialization format, as `String`s.
+  *   Models reuse the shared `repositoryName` column for their LakeFS repository.
   */
 class UnifiedResourceSchema private (
     fieldMappingSeq: Seq[(Field[_], Field[_])]
