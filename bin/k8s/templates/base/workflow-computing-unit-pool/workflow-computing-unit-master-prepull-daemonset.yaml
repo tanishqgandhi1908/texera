@@ -37,7 +37,9 @@ spec:
       initContainers:
         - name: prepuller
           image: {{ .Values.texera.imageRegistry }}/{{ .Values.workflowComputingUnitPool.imageName }}:{{ .Values.texera.imageTag }}
-          imagePullPolicy: Always
+          # Same policy as the CU pods this prepulls for, so a locally built image
+          # (never pushed to a registry) is honoured instead of failing to pull.
+          imagePullPolicy: {{ .Values.texeraImages.pullPolicy }}
           command: ["sh", "-c", "true"]
       containers:
         - name: pause

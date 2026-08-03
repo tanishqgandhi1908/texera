@@ -279,6 +279,9 @@ jobs:
                 "agent-service")
                   image_name="texera-agent-service"
                   ;;
+                "mounter")
+                  image_name="texera-mounter"
+                  ;;
                 *)
                   # Default: use service name as-is
                   image_name="$service"
