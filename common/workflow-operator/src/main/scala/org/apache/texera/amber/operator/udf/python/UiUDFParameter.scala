@@ -44,4 +44,19 @@ class UiUDFParameter {
   @JsonProperty()
   @JsonSchemaTitle("Value")
   var value: EncodableString = ""
+
+  /**
+    * Which editor the value gets, and how it is interpreted.
+    *
+    * Empty (the default) means an ordinary value, typed as `attribute`. "models" means the
+    * value is a model version path chosen from the model picker, which
+    * [[PythonUdfUiParameterSupport]] turns into the directory that version is mounted at
+    * before the value reaches the generated code.
+    *
+    * Derived from the UDF's source, like `attribute` — it is not something the user sets
+    * on the row.
+    */
+  @JsonProperty()
+  @JsonSchemaTitle("Input type")
+  var inputType: String = ""
 }

@@ -36,10 +36,12 @@ class PythonUDFOpDescV2 extends LogicalOp {
   @JsonProperty(
     required = true,
     defaultValue =
-      "# Models mounted on this computing unit and bound to variables in the\n" +
-        "# \"Model variables\" property are available as local paths. For\n" +
-        "# example, if you bind a model to the variable M:\n" +
-        "#     torch.load(f\"{M}/model.pt\")\n" +
+      "# Declare a UI parameter to get an editable value in the property panel:\n" +
+        "#     name = self.UiParameter(\"name\", AttributeType.STRING).value\n" +
+        "# Use the models type to pick a model version; the value is the local\n" +
+        "# directory it is mounted at:\n" +
+        "#     model_dir = self.UiParameter(\"MODEL\", UiParameterType.MODELS).value\n" +
+        "#     torch.load(f\"{model_dir}/model.pt\")\n" +
         "# \n" +
         "# Choose from the following templates:\n" +
         "# \n" +
@@ -98,12 +100,13 @@ class PythonUDFOpDescV2 extends LogicalOp {
   var outputColumns: List[Attribute] = List()
 
   @JsonProperty()
-  @JsonSchemaTitle("Model variables")
+  @JsonSchemaTitle("UI parameters")
   @JsonPropertyDescription(
-    "Bind model versions to variables. In your code, each variable holds the local " +
-      "filesystem path to that model; it is mounted into the computing unit when the workflow runs."
+    "Values for the self.UiParameter(...) calls declared in the code above. Rows appear as you " +
+      "declare them; a parameter of type models is filled from the model picker and reaches your " +
+      "code as the local path that model version is mounted at."
   )
-  var modelVariables: List[ModelVariableMapping] = List()
+  var uiParameters: List[UiUDFParameter] = List()
 
   override def getPhysicalOp(
       workflowId: WorkflowIdentity,
@@ -138,13 +141,17 @@ class PythonUDFOpDescV2 extends LogicalOp {
       Map(operatorInfo.outputPorts.head.id -> outputSchema)
     }
 
+    // UI parameter values are baked into the code the worker runs; models parameters
+    // additionally tell us which model versions that worker has to mount first.
+    val (executedCode, mountedModels) = PythonUdfUiParameterSupport.injectInto(code, uiParameters)
+
     val physicalOp = if (workers > 1) {
       PhysicalOp
         .oneToOnePhysicalOp(
           workflowId,
           executionId,
           operatorIdentifier,
-          OpExecWithCode(code, "python")
+          OpExecWithCode(executedCode, "python")
         )
         .withParallelizable(true)
         .withSuggestedWorkerNum(workers)
@@ -154,7 +161,7 @@ class PythonUDFOpDescV2 extends LogicalOp {
           workflowId,
           executionId,
           operatorIdentifier,
-          OpExecWithCode(code, "python")
+          OpExecWithCode(executedCode, "python")
         )
         .withParallelizable(false)
     }
@@ -170,34 +177,6 @@ class PythonUDFOpDescV2 extends LogicalOp {
         trimmed
       }
 
-    // Resolve each bound model version to a "<repositoryName>:<commitHash>" locator,
-    // keyed by the Python variable it will be exposed as.
-    val variableBindings = Option(modelVariables).getOrElse(List.empty).flatMap { mapping =>
-      val variableName = Option(mapping.variableName).map(_.trim).getOrElse("")
-      val modelPath = Option(mapping.modelPath).map(_.trim).getOrElse("")
-      if (variableName.isEmpty && modelPath.isEmpty) None // ignore fully blank rows
-      else {
-        if (!variableName.matches("[A-Za-z_][A-Za-z0-9_]*"))
-          throw new RuntimeException(
-            s"'$variableName' is not a valid Python variable name for a mounted model."
-          )
-        if (modelPath.isEmpty)
-          throw new RuntimeException(
-            s"No model selected for the mounted-model variable '$variableName'."
-          )
-        val (repositoryName, versionHash) = FileResolver.resolveModelVersion(modelPath)
-        Some(variableName -> s"$repositoryName:$versionHash")
-      }
-    }
-    val duplicateVariables =
-      variableBindings.map(_._1).groupBy(identity).collect {
-        case (name, xs) if xs.size > 1 => name
-      }
-    if (duplicateVariables.nonEmpty)
-      throw new RuntimeException(
-        s"Duplicate mounted-model variable name(s): ${duplicateVariables.mkString(", ")}"
-      )
-    val mountedModels = variableBindings.toMap
 
     physicalOp
       .withDerivePartition(_ => UnknownPartition())

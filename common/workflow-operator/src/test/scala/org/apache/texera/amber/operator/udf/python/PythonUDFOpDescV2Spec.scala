@@ -238,38 +238,60 @@ class PythonUDFOpDescV2Spec extends AnyFlatSpec with Matchers {
     }
   }
 
-  private def binding(name: String, path: String): ModelVariableMapping = {
-    val m = new ModelVariableMapping
-    m.variableName = name
-    m.modelPath = path
-    m
+  private def modelsParameter(name: String, path: String): UiUDFParameter = {
+    val parameter = new UiUDFParameter
+    parameter.attribute = new Attribute(name, AttributeType.STRING)
+    parameter.inputType = PythonUdfUiParameterSupport.ModelsInputType
+    parameter.value = path
+    parameter
   }
 
-  "PythonUDFOpDescV2 model-variable bindings" should
-    "carry no mounted models when nothing is bound" in {
+  "PythonUDFOpDescV2 models parameters" should
+    "carry no mounted models when none are declared" in {
     val d = new PythonUDFOpDescV2
     d.code = "yield t"
     d.getPhysicalOp(workflowId, executionId).mountedModels shouldBe empty
   }
 
-  it should "ignore fully blank model-variable rows" in {
+  it should "inject ordinary parameter values into the code the worker runs" in {
     val d = new PythonUDFOpDescV2
-    d.code = "yield t"
-    d.modelVariables = List(binding("", ""), binding("   ", "   "))
-    d.getPhysicalOp(workflowId, executionId).mountedModels shouldBe empty
+    d.code = pythonUdfClass
+    val parameter = new UiUDFParameter
+    parameter.attribute = new Attribute("threshold", AttributeType.INTEGER)
+    parameter.value = "7"
+    d.uiParameters = List(parameter)
+
+    val physical = d.getPhysicalOp(workflowId, executionId)
+    physical.mountedModels shouldBe empty
+    physical.opExecInitInfo match {
+      case OpExecWithCode(code, _) => code should include("_texera_injected_ui_parameters")
+      case other                   => fail(s"expected OpExecWithCode, got $other")
+    }
   }
 
-  it should "reject a variable name that is not a valid Python identifier" in {
+  it should "reject a models parameter with no model selected" in {
     val d = new PythonUDFOpDescV2
-    d.modelVariables = List(binding("1bad", "/models/bob@texera.com/resnet/v1"))
-    val ex = intercept[RuntimeException] { d.getPhysicalOp(workflowId, executionId) }
-    ex.getMessage should include("not a valid Python variable name")
-  }
-
-  it should "reject a bound variable with no model selected" in {
-    val d = new PythonUDFOpDescV2
-    d.modelVariables = List(binding("A", "   "))
+    d.code = pythonUdfClass
+    d.uiParameters = List(modelsParameter("MODEL", "   "))
     val ex = intercept[RuntimeException] { d.getPhysicalOp(workflowId, executionId) }
     ex.getMessage should include("No model selected")
   }
+
+  it should "leave code unchanged when no UI parameters are declared" in {
+    val d = new PythonUDFOpDescV2
+    d.code = pythonUdfClass
+    d.getPhysicalOp(workflowId, executionId).opExecInitInfo match {
+      case OpExecWithCode(code, _) => code shouldBe pythonUdfClass
+      case other                   => fail(s"expected OpExecWithCode, got $other")
+    }
+  }
+
+  private val pythonUdfClass =
+    """from pytexera import *
+      |
+      |class ProcessTupleOperator(UDFOperatorV2):
+      |    @overrides
+      |    def open(self):
+      |        pass
+      |""".stripMargin
 }

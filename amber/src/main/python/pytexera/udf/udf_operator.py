@@ -18,6 +18,7 @@
 from abc import abstractmethod
 from dataclasses import dataclass
 import functools
+from enum import Enum
 from typing import Any, Dict, Iterator, Optional, Set, Union
 
 from pyamber import *
@@ -25,10 +26,22 @@ from core.models.schema.attribute_type import AttributeType, FROM_STRING_PARSER_
 from loguru import logger
 
 
+class UiParameterType(Enum):
+    """UI-only parameter kinds, for values that are not tuple attribute types.
+
+    MODELS asks the property panel for a model version instead of free text. The
+    value handed to the UDF is the local directory that version is mounted at, so
+    the code opens files under it exactly as it would any other directory. Which
+    version that is, and mounting it, are settled before the worker starts.
+    """
+
+    MODELS = "models"
+
+
 @dataclass(frozen=True)
 class _UiParameterValue:
     name: str
-    type: AttributeType
+    type: Union[AttributeType, UiParameterType]
     value: Any
 
 
@@ -123,9 +136,10 @@ class _UiParameterSupport:
         if attr_type is None:
             raise TypeError("UiParameter.type is required.")
 
-        if not isinstance(attr_type, AttributeType):
+        if not isinstance(attr_type, (AttributeType, UiParameterType)):
             raise TypeError(
-                f"UiParameter.type must be an AttributeType, got {attr_type!r}."
+                f"UiParameter.type must be an AttributeType or UiParameterType, "
+                f"got {attr_type!r}."
             )
 
         self._ensure_ui_parameter_state()
@@ -154,7 +168,12 @@ class _UiParameterSupport:
         )
 
     @staticmethod
-    def _parse(value: Any, attr_type: AttributeType) -> Any:
+    def _parse(value: Any, attr_type: Union[AttributeType, UiParameterType]) -> Any:
+        # A models parameter is already a filesystem path by the time it arrives;
+        # there is nothing to parse and no attribute type to parse it as.
+        if isinstance(attr_type, UiParameterType):
+            return value
+
         if attr_type in _UiParameterSupport._unsupported_ui_parameter_types:
             raise ValueError(
                 f"UiParameter does not support {attr_type.name} values. "
