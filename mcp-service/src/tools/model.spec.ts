@@ -424,3 +424,19 @@ describe("workflow_run mount precondition", () => {
     expect(output).toContain("Ran workflow 4");
   });
 });
+
+describe("upload ceiling", () => {
+  it("names the site setting when the deployment's per-file ceiling rejects a checkpoint", async () => {
+    const deployment = deploymentWithModel().post("/api/model/multipart-upload", request =>
+      request.query.get("type") === "init"
+        ? text("fileSizeBytes=1024013755 exceeds singleFileUploadMaxBytes=20971520", 400)
+        : json({ message: "ok" })
+    );
+    harness = await startHarness(deployment, { TEXERA_MULTIPART_PART_BYTES: "1024" });
+    const path = await tempFile("model.pt", new Uint8Array(2048));
+
+    const error = await harness.callExpectingError("model_upload_local_file", { mid: 5, local_path: path });
+    expect(error).toContain("single_file_upload_max_size_mib");
+    expect(error).toContain("administrator");
+  });
+});

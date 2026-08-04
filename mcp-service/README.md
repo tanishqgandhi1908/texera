@@ -23,8 +23,10 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server that connects
 chatbot — Claude Desktop, Claude Code, Cursor, ChatGPT Desktop — to a user's account on **any**
 Texera deployment.
 
-The chatbot can then manage datasets, build and edit workflows operator by operator, run them and
-read the results, all against the user's own account.
+The chatbot can then manage datasets and models, build and edit workflows operator by operator, run them
+and read the results, all against the user's own account. While it edits, it joins the workflow's
+shared-editing room, so it appears in the participant list with its own avatar and its changes land on
+the user's canvas as they happen.
 
 Design and rationale: [DESIGN.md](DESIGN.md).
 
@@ -81,24 +83,30 @@ which is the fastest way to confirm the setup.
 | `TEXERA_MAX_UPLOAD_BYTES` | no | `26214400` | Ceiling on one `dataset_upload_file`. |
 | `TEXERA_RUN_TIMEOUT_SECONDS` | no | `120` | Default budget for `workflow_run`. |
 | `TEXERA_REQUEST_TIMEOUT_MS` | no | `60000` | Per-request HTTP timeout. |
+| `TEXERA_LIVE_COEDITING` | no | `true` | Join the workflow's shared-editing room on `workflow_open`. |
+| `TEXERA_MCP_CLIENT_NAME` | no | `Claude` | Name shown to other participants. |
+| `TEXERA_MCP_AVATAR_URL` | no | Claude's mark | Avatar shown to other participants (`https:` or `data:image/…`). |
+| `TEXERA_MCP_COLOR` | no | `#D97757` | Pointer, highlight and avatar colour. |
+| `TEXERA_LOCAL_FILE_ROOT` | no | — | Confines `*_upload_local_file` to one directory. |
+| `TEXERA_MULTIPART_PART_BYTES` | no | `16777216` | Part size for multipart model uploads. |
 
 Bad configuration fails at startup with a message naming the variable, rather than surfacing as a
 confusing failure mid-conversation.
 
 ---
 
-## Two rules that are easy to get wrong
+## Three rules that are easy to get wrong
 
-Both are stated in the server's instructions and repeated in the relevant tool descriptions, because
-ignoring either produces something that looks fine and silently does not work.
+All three are stated in the server's instructions and repeated in the relevant tool descriptions,
+because ignoring any of them produces something that looks fine and silently does not work.
 
-**Dataset uploads are staged.** `dataset_upload_file` and `dataset_delete_file` change nothing a
-workflow can read until `dataset_create_version` commits them — datasets are LakeFS repositories and
-a version is a commit.
+**Uploads are staged.** `dataset_upload_file`, `model_upload_local_file` and the delete tools change
+nothing a workflow can read until a version commits them — datasets and models are LakeFS repositories
+and a version is a commit.
 
 ```
-dataset_create → dataset_upload_file → dataset_create_version → dataset_list_files
-                                       ^^^^^^^^^^^^^^^^^^^^^^ without this, no operator can see the data
+dataset_create → dataset_upload_local_file → dataset_create_version → dataset_list_files
+                                             ^^^^^^^^^^^^^^^^^^^^^^ without this, no operator sees the data
 ```
 
 **Workflow edits are in memory.** `workflow_open` loads a workflow, the editing tools change a local
@@ -107,6 +115,15 @@ in-memory graph, so you can test before committing to a save.
 
 ```
 workflow_open → add/modify/delete → workflow_validate → workflow_run → workflow_save
+```
+
+**A model must be mounted before a UDF can read it.** A mount exposes one committed version inside one
+computing unit as a read-only filesystem; a Python UDF binds a variable to it through the operator's
+`modelVariables` property. Without the mount the variable points at nothing, and the UDF fails on a
+missing path minutes into a run — so `workflow_run` checks first and refuses.
+
+```
+model_create_version → computing_unit_mount_model → workflow_add_operator(… modelVariables …) → workflow_run
 ```
 
 ---
@@ -132,11 +149,26 @@ workflow_open → add/modify/delete → workflow_validate → workflow_run → w
 | `dataset_uncommitted_changes` | What is staged but not yet committed. |
 | `dataset_list_access` / `dataset_share` / `dataset_unshare` | Sharing by email. |
 
-### Workflows
+### Models
+
+Trained weights, versioned like datasets and **mounted** rather than copied — a computing unit exposes
+a model version as a read-only filesystem, so a UDF can `torch.load` a multi-gigabyte checkpoint without
+the pod ever downloading it.
 
 | Tool | What it does |
 | --- | --- |
-| `workflow_list` / `workflow_create` / `workflow_update` / `workflow_duplicate` / `workflow_delete` | Manage workflows. |
+| `model_list` / `model_get` | Browse models and their versions, with the locator that mounts each one. |
+| `model_create` / `model_update` / `model_delete` | Manage models. Framework and format are fixed at creation. |
+| `model_upload_local_file` | Upload weights from disk. Large files go in resumable parts. |
+| `model_upload_text_file` / `model_delete_file` | Stage a small text file, or a deletion. |
+| `model_create_version` | Commit staged files into a mountable version. |
+| `model_list_files` / `model_uncommitted_changes` | What is in a version, and what is staged. |
+| `computing_unit_list_mounts` / `computing_unit_mount_model` / `computing_unit_unmount_model` | Manage a unit's mounts. |
+
+### Workflows
+
+| Tool | What it does |
+| --- | --- | / `workflow_create` / `workflow_update` / `workflow_duplicate` / `workflow_delete` | Manage workflows. |
 | `workflow_open` / `workflow_describe` / `workflow_discard` | Open, inspect and abandon an edit session. |
 | `workflow_add_operator` / `workflow_modify_operator` / `workflow_delete_operator` | Edit the graph. Properties are checked against the operator's schema first. |
 | `workflow_add_link` / `workflow_delete_link` / `workflow_auto_layout` | Edit connections and layout. |

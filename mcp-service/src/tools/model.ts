@@ -466,23 +466,39 @@ export function registerModelTools(server: McpServer, context: McpContext): void
       const started = Date.now();
       let summary: string;
 
-      if (file.size <= ctx.config.multipartPartBytes) {
-        await uploadModelFile(ctx.client, args.mid, filePath, await file.read(0, file.size));
-        summary = "in one request";
-      } else {
-        const { totalParts, uploadedParts } = await uploadModelFileMultipart(
-          ctx.client,
-          { ownerEmail: entry.ownerEmail, modelName: entry.model.name, filePath },
-          {
-            fileSizeBytes: file.size,
-            partSizeBytes: ctx.config.multipartPartBytes,
-            readPart: (offset, length) => file.read(offset, length),
-          }
-        );
-        summary =
-          uploadedParts === totalParts
-            ? `in ${totalParts} parts`
-            : `in ${uploadedParts} of ${totalParts} parts (the rest were already uploaded)`;
+      try {
+        if (file.size <= ctx.config.multipartPartBytes) {
+          await uploadModelFile(ctx.client, args.mid, filePath, await file.read(0, file.size));
+          summary = "in one request";
+        } else {
+          const { totalParts, uploadedParts } = await uploadModelFileMultipart(
+            ctx.client,
+            { ownerEmail: entry.ownerEmail, modelName: entry.model.name, filePath },
+            {
+              fileSizeBytes: file.size,
+              partSizeBytes: ctx.config.multipartPartBytes,
+              readPart: (offset, length) => file.read(offset, length),
+            }
+          );
+          summary =
+            uploadedParts === totalParts
+              ? `in ${totalParts} parts`
+              : `in ${uploadedParts} of ${totalParts} parts (the rest were already uploaded)`;
+        }
+      } catch (error) {
+        await file.close();
+        // The deployment's own ceiling, not this server's — a size the admin
+        // sets and can raise, so say so rather than leaving it looking like a
+        // limitation of the upload.
+        if (error instanceof TexeraApiError && /singleFileUploadMaxBytes/.test(error.body)) {
+          throw new ToolError(
+            `${file.name} is ${formatBytes(file.size)}, over this deployment's per-file ceiling. ` +
+              `Server said: ${error.body.trim()}. That ceiling is the "single_file_upload_max_size_mib" ` +
+              `site setting; an administrator can raise it in the admin settings page. Model checkpoints ` +
+              `routinely exceed the 20 MiB default.`
+          );
+        }
+        throw error;
       }
 
       await file.close();
