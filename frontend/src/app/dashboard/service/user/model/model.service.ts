@@ -33,6 +33,8 @@ export const MODEL_CREATE_URL = MODEL_BASE_URL + "/create";
 export const MODEL_UPDATE_BASE_URL = MODEL_BASE_URL + "/update";
 export const MODEL_UPDATE_NAME_URL = MODEL_UPDATE_BASE_URL + "/name";
 export const MODEL_UPDATE_DESCRIPTION_URL = MODEL_UPDATE_BASE_URL + "/description";
+export const MODEL_UPDATE_FRAMEWORK_URL = MODEL_UPDATE_BASE_URL + "/framework";
+export const MODEL_UPDATE_FORMAT_URL = MODEL_UPDATE_BASE_URL + "/format";
 export const MODEL_UPDATE_PUBLICITY_URL = "update/publicity";
 export const MODEL_UPDATE_DOWNLOADABLE_URL = "update/downloadable";
 export const MODEL_LIST_URL = MODEL_BASE_URL + "/list";
@@ -107,6 +109,20 @@ export class ModelService {
     return this.http.post<Response>(`${AppSettings.getApiEndpoint()}/${MODEL_UPDATE_NAME_URL}`, {
       mid: mid,
       name: name,
+    });
+  }
+
+  public updateModelFramework(mid: number, framework: string): Observable<Response> {
+    return this.http.post<Response>(`${AppSettings.getApiEndpoint()}/${MODEL_UPDATE_FRAMEWORK_URL}`, {
+      mid: mid,
+      framework: framework,
+    });
+  }
+
+  public updateModelFormat(mid: number, format: string): Observable<Response> {
+    return this.http.post<Response>(`${AppSettings.getApiEndpoint()}/${MODEL_UPDATE_FORMAT_URL}`, {
+      mid: mid,
+      format: format,
     });
   }
 
