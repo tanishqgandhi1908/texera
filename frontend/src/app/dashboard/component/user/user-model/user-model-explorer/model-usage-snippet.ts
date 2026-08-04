@@ -165,10 +165,11 @@ function predictLines(framework: string | undefined): string[] {
 }
 
 /**
- * A Python UDF that loads this model. The model is mounted into the computing
- * unit and exposed through the variable declared in the operator's property
- * panel, so the snippet joins that variable with the file's relative path
- * rather than resolving a logical path itself.
+ * A Python UDF that loads this model. The model is named by a UI parameter the code
+ * declares for itself; the property panel offers a model picker for that row, and the
+ * value handed back is the directory the version is mounted at. So the snippet joins
+ * that directory with the file's relative path rather than resolving a logical path
+ * itself.
  */
 export function buildModelUsageSnippet(ctx: ModelSnippetContext): string {
   const variable = modelVariableName(ctx.modelName);
@@ -187,9 +188,10 @@ export function buildModelUsageSnippet(ctx: ModelSnippetContext): string {
     "",
     "class ProcessTupleOperator(UDFOperatorV2):",
     "    def open(self):",
-    `        # \`${variable}\` is the model variable declared in this operator's property`,
-    "        # panel. The model is mounted read-only in the computing unit, so it is an",
-    "        # ordinary filesystem path -- no download needed.",
+    "        # Declaring the parameter puts a row in this operator's property panel; pick",
+    "        # the model version there. The value is the directory it is mounted at --",
+    "        # read-only and already local, so no download is needed.",
+    `        ${variable} = self.UiParameter("${variable}", UiParameterType.MODELS).value`,
   ];
 
   if (!usesDirectory) {

@@ -170,7 +170,12 @@ export class CodeEditorComponent implements AfterViewInit, SafeStyle, OnDestroy 
 
     // Parameter rows are inferred from the code, so the panel has to follow the editor:
     // declaring self.UiParameter(...) here should make its row appear over there.
-    this.detachUiParameterSync = this.uiUdfParametersSyncService.attachToYCode(this.currentOperatorId, this.code);
+    // Guarded because an operator whose shared properties carry no code buffer -- a
+    // non-UDF, or a stubbed graph -- has nothing to observe, and failing to open the
+    // editor over that would be a poor trade for a feature that only annotates it.
+    if (this.code) {
+      this.detachUiParameterSync = this.uiUdfParametersSyncService.attachToYCode(this.currentOperatorId, this.code);
+    }
   }
 
   ngAfterViewInit() {
