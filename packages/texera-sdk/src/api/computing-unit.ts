@@ -119,3 +119,53 @@ export async function renameComputingUnit(client: TexeraClient, cuid: number, na
 export function isComputingUnitReady(unit: DashboardWorkflowComputingUnit): boolean {
   return unit.status === "Running" && !unit.computingUnit.terminateTime;
 }
+
+// ---------------------------------------------------------------------------
+// Model mounts
+// ---------------------------------------------------------------------------
+
+/**
+ * A model version made visible inside a computing unit's pod as a read-only
+ * FUSE filesystem, rather than copied into it. Nothing is transferred at mount
+ * time — bytes are fetched on read — so mounting a multi-gigabyte checkpoint is
+ * effectively free and only the parts a UDF touches ever move.
+ *
+ * Mounts live in the kernel's mount table on the node, not in a database: they
+ * are per-computing-unit and disappear with the pod.
+ */
+export interface MountedModelInfo {
+  /** `/models/ownerEmail/modelName/versionName`, empty if it could not be resolved. */
+  modelPath: string;
+  /** LakeFS repository, i.e. `model-<mid>`. */
+  repositoryName: string;
+  /** The version's commit hash — a mount is pinned to one commit. */
+  commitHash: string;
+  /** Absolute path the model appears at inside the pod. */
+  mountPath: string;
+}
+
+export async function listMountedModels(client: TexeraClient, cuid: number): Promise<MountedModelInfo[]> {
+  return client.request<MountedModelInfo[]>("computingUnit", `/api/computing-unit/${cuid}/mounts`);
+}
+
+/**
+ * Mounts a model version onto a computing unit. `modelPath` is the logical
+ * `/models/ownerEmail/modelName/versionName` string, the same value a Python
+ * UDF's `modelVariables` entry names.
+ *
+ * Kubernetes units only — a local unit has no node mounter to talk to.
+ */
+export async function mountModel(client: TexeraClient, cuid: number, modelPath: string): Promise<MountedModelInfo> {
+  return client.request<MountedModelInfo>("computingUnit", `/api/computing-unit/${cuid}/mounts`, {
+    method: "POST",
+    json: { modelPath },
+    timeoutMs: 120_000,
+  });
+}
+
+export async function unmountModel(client: TexeraClient, cuid: number, modelPath: string): Promise<void> {
+  await client.request<void>("computingUnit", `/api/computing-unit/${cuid}/mounts`, {
+    method: "DELETE",
+    json: { modelPath },
+  });
+}

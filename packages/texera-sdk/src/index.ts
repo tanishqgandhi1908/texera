@@ -29,6 +29,7 @@ export * from "./api/config";
 export * from "./api/metadata";
 export * from "./api/workflow";
 export * from "./api/dataset";
+export * from "./api/model";
 export * from "./api/compile";
 export * from "./api/execution";
 export * from "./api/computing-unit";

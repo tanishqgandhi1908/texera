@@ -191,3 +191,62 @@ export function computingUnitResponse(overrides: Partial<{ cuid: number; name: s
     ownerName: "alice",
   };
 }
+
+export function modelResponse(
+  overrides: Partial<{
+    mid: number;
+    name: string;
+    ownerEmail: string;
+    framework: string;
+    format: string;
+    isOwner: boolean;
+    accessPrivilege: string;
+    size: number;
+  }> = {}
+) {
+  const mid = overrides.mid ?? 5;
+  return {
+    model: {
+      mid,
+      name: overrides.name ?? "iris-classifier",
+      description: "Trained on the iris dataset",
+      ownerUid: 7,
+      isPublic: false,
+      isDownloadable: false,
+      creationTime: 1_700_000_000_000,
+      repositoryName: `model-${mid}`,
+      framework: overrides.framework ?? "pytorch",
+      format: overrides.format ?? "state-dict",
+    },
+    ownerEmail: overrides.ownerEmail ?? "alice@example.org",
+    accessPrivilege: overrides.accessPrivilege ?? "WRITE",
+    isOwner: overrides.isOwner ?? true,
+    size: overrides.size ?? 1_073_741_824,
+  };
+}
+
+export function modelVersionResponse(
+  overrides: Partial<{ mvid: number; mid: number; name: string; versionHash: string }> = {}
+) {
+  return {
+    mvid: overrides.mvid ?? 11,
+    mid: overrides.mid ?? 5,
+    creatorUid: 7,
+    name: overrides.name ?? "v1",
+    versionHash: overrides.versionHash ?? "5226497070d1f612e448284c32de2b815dd8177829bd73e4e47f352f542ca3ca",
+    creationTime: 1_700_000_100_000,
+  };
+}
+
+export function mountedModelResponse(
+  overrides: Partial<{ modelPath: string; repositoryName: string; commitHash: string; mountPath: string }> = {}
+) {
+  const repositoryName = overrides.repositoryName ?? "model-5";
+  const commitHash = overrides.commitHash ?? "5226497070d1f612e448284c32de2b815dd8177829bd73e4e47f352f542ca3ca";
+  return {
+    modelPath: overrides.modelPath ?? "/models/alice@example.org/iris-classifier/v1",
+    repositoryName,
+    commitHash,
+    mountPath: overrides.mountPath ?? `/mnt/texera-mounts/${repositoryName}/${commitHash}`,
+  };
+}

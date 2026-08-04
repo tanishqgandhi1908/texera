@@ -302,7 +302,11 @@ export function flattenFileNodes(
   return accumulator;
 }
 
-/** The `/ownerEmail/datasetName/versionName` prefix a version's files live under. */
+/**
+ * The `/datasets/ownerEmail/datasetName/versionName` prefix a version's files
+ * live under. The leading resource-type segment distinguishes datasets from
+ * models, which share the same path grammar (`ResourceType`, `FileResolver`).
+ */
 export function versionRootPath(ownerEmail: string, datasetName: string, versionName: string): string {
-  return `/${ownerEmail}/${datasetName}/${versionName}`;
+  return `/datasets/${ownerEmail}/${datasetName}/${versionName}`;
 }

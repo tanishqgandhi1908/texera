@@ -25,17 +25,72 @@ import {
   getComputingUnitTypes,
   isComputingUnitReady,
   listComputingUnits,
+  listMountedModels,
   renameComputingUnit,
   runWorkflowSync,
   terminateComputingUnit,
   type DashboardWorkflowComputingUnit,
   type OperatorInfo,
+  type OperatorPredicate,
   type SyncExecutionResult,
 } from "@texera/sdk";
 import type { McpContext } from "../context";
 import { ToolError } from "../errors";
 import { formatRecords, formatTable, formatTimestamp, joinSections } from "../format";
 import { registerTool } from "../register";
+
+/**
+ * Model variables a workflow's Python UDFs expect, as `variable -> model path`.
+ *
+ * A UDF that names a model it cannot reach fails inside Python with a path that
+ * does not exist, several minutes into an execution. Checking the mounts first
+ * turns that into one sentence naming the tool that fixes it.
+ */
+function requiredModelPaths(operators: readonly OperatorPredicate[]): Map<string, string> {
+  const required = new Map<string, string>();
+  for (const operator of operators) {
+    const variables = operator.operatorProperties?.modelVariables;
+    if (!Array.isArray(variables)) continue;
+    for (const variable of variables) {
+      const name = (variable as { variableName?: unknown })?.variableName;
+      const path = (variable as { modelPath?: unknown })?.modelPath;
+      if (typeof name === "string" && typeof path === "string" && path !== "") required.set(name, path);
+    }
+  }
+  return required;
+}
+
+/**
+ * Returns a message naming the models a run needs and does not have mounted, or
+ * undefined when it is ready to go. A failure to list mounts is not treated as
+ * a missing mount: the run may well work, and blocking it on a metadata call
+ * would be worse than letting it try.
+ */
+async function describeMissingMounts(
+  context: McpContext,
+  cuid: number,
+  required: Map<string, string>
+): Promise<string | undefined> {
+  if (required.size === 0) return undefined;
+  let mounted;
+  try {
+    mounted = await listMountedModels(context.client, cuid);
+  } catch {
+    return undefined;
+  }
+  const mountedPaths = new Set(mounted.map(mount => mount.modelPath));
+  const missing = [...required].filter(([, path]) => !mountedPaths.has(path));
+  if (missing.length === 0) return undefined;
+
+  return (
+    `This workflow's Python UDF(s) bind ${missing.map(([name]) => `"${name}"`).join(", ")} to ` +
+    `${missing.map(([, path]) => path).join(", ")}, which ${missing.length === 1 ? "is" : "are"} not mounted on ` +
+    `computing unit ${cuid}. The UDF would fail on a path that does not exist. ` +
+    `Mount ${missing.length === 1 ? "it" : "them"} first: ` +
+    missing.map(([, path]) => `computing_unit_mount_model(cuid: ${cuid}, model_path: "${path}")`).join("; ") +
+    `.`
+  );
+}
 
 /** Picks a running unit when the caller did not name one. */
 async function resolveComputingUnit(
@@ -347,6 +402,15 @@ export function registerExecutionTools(server: McpServer, context: McpContext): 
       const unit = await resolveComputingUnit(ctx, args.computing_unit_id);
       const targets = args.target_operator_id ? [args.target_operator_id] : [];
       const plan = session.state.toLogicalPlan(args.target_operator_id);
+
+      const missingMounts = await describeMissingMounts(
+        ctx,
+        unit.computingUnit.cuid,
+        requiredModelPaths(
+          args.target_operator_id ? session.state.getSubDAG(args.target_operator_id).operators : operators
+        )
+      );
+      if (missingMounts) throw new ToolError(missingMounts);
 
       const result = await runWorkflowSync(ctx.client, {
         workflowId: session.wid,

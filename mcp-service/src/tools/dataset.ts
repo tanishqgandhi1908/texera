@@ -44,6 +44,7 @@ import type { McpContext } from "../context";
 import { ToolError } from "../errors";
 import { formatBytes, formatTable, formatTimestamp, joinSections, truncate } from "../format";
 import { registerTool } from "../register";
+import { openLocalFile } from "../local-file";
 
 /**
  * The uncommitted-changes rule stated once, and repeated into every tool
@@ -407,6 +408,48 @@ export function registerDatasetTools(server: McpServer, context: McpContext): vo
       await uploadFile(ctx.client, args.did, args.file_path, bytes, { message: args.message });
       return (
         `Uploaded ${args.file_path} (${formatBytes(bytes.byteLength)}) to dataset ${args.did}.\n` +
+        `${COMMIT_NOTE} Call dataset_create_version when you have finished uploading.`
+      );
+    },
+  });
+
+  registerTool(server, context, {
+    name: "dataset_upload_local_file",
+    title: "Upload a file from disk into a dataset",
+    description:
+      `Upload a file from the local filesystem into a dataset. ${COMMIT_NOTE} ` +
+      "Use this for data that already exists as a file — a CSV produced by a script, an export — rather " +
+      "than reading it and passing the text back through dataset_upload_file. This server runs on the " +
+      "user's machine, so the path is theirs.",
+    inputSchema: {
+      did: z.number().int().describe("Dataset id"),
+      local_path: z.string().min(1).describe("Absolute path to the file on this machine"),
+      file_path: z
+        .string()
+        .optional()
+        .describe('Path within the dataset, e.g. "data/cases.csv". Defaults to the local file\'s name.'),
+    },
+    handler: async (args: { did: number; local_path: string; file_path?: string }, ctx) => {
+      const file = await openLocalFile(ctx.config, args.local_path);
+      const filePath = args.file_path ?? file.name;
+      if (filePath.startsWith("/") || filePath.includes("..")) {
+        throw new ToolError(
+          `Invalid file_path "${filePath}": use a relative path inside the dataset, without ".." segments.`
+        );
+      }
+      if (file.size > ctx.config.maxUploadBytes) {
+        await file.close();
+        throw new ToolError(
+          `${file.name} is ${formatBytes(file.size)}, over the ${formatBytes(ctx.config.maxUploadBytes)} ` +
+            `single-request upload limit for datasets. Split it, raise TEXERA_MAX_UPLOAD_BYTES, or — if this ` +
+            `is model weights rather than data — use a model and model_upload_local_file, which sends in parts.`
+        );
+      }
+
+      await uploadFile(ctx.client, args.did, filePath, await file.read(0, file.size));
+      await file.close();
+      return (
+        `Uploaded ${filePath} (${formatBytes(file.size)}) to dataset ${args.did}.\n` +
         `${COMMIT_NOTE} Call dataset_create_version when you have finished uploading.`
       );
     },
