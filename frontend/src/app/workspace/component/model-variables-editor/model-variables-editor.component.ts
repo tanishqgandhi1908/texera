@@ -83,18 +83,17 @@ export class ModelVariablesEditorComponent extends FieldType<FieldTypeConfig> im
   /** Opens the model/version picker and stores the chosen version's logical path. */
   openModelPicker(index: number): void {
     const modal = this.modalService.create({
+      nzTitle: "Select a model version",
       nzContent: ModelSelectionModalComponent,
       nzFooter: null,
       nzData: { selectedPath: this.rows[index]?.modelPath || null },
-      nzBodyStyle: {
-        resize: "both",
-        overflow: "auto",
-        minHeight: "200px",
-        minWidth: "550px",
-        maxWidth: "90vw",
-        maxHeight: "80vh",
-      },
-      nzWidth: "fit-content",
+      // An explicit width, not "fit-content": the picker's contents are two
+      // flex-sized selects and an initially empty file tree, so there is nothing
+      // to size against and the dialog collapses to a few dozen pixels.
+      // `nzBodyStyle.minWidth` does not rescue it — ng-zorro applies that style
+      // to the body, which the already-collapsed dialog then clips.
+      nzWidth: 720,
+      nzBodyStyle: { overflow: "auto", minHeight: "200px", maxHeight: "70vh" },
     });
     modal.afterClose.pipe(untilDestroyed(this)).subscribe((selectedPath?: string) => {
       if (!selectedPath) return;
