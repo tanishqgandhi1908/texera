@@ -79,6 +79,10 @@ export class AdminSettingsComponent implements OnInit {
 
   maxConcurrentFiles: number = 3;
   maxFileSizeMiB: number = 20;
+  modelMaxFileSizeMiB: number = 2048;
+  modelMaxConcurrentFiles: number = 3;
+  modelMaxConcurrentChunks: number = 10;
+  modelChunkSizeMiB: number = 50;
   maxConcurrentChunks: number = 10;
   chunkSizeMiB: number = 50;
 
@@ -128,6 +132,22 @@ export class AdminSettingsComponent implements OnInit {
             this.maxConcurrentFiles
           );
           this.maxFileSizeMiB = parseIntOrDefault(settings["single_file_upload_max_size_mib"], this.maxFileSizeMiB);
+          this.modelMaxFileSizeMiB = parseIntOrDefault(
+            settings["model_single_file_upload_max_size_mib"],
+            this.modelMaxFileSizeMiB
+          );
+          this.modelMaxConcurrentFiles = parseIntOrDefault(
+            settings["model_max_number_of_concurrent_uploading_file"],
+            this.modelMaxConcurrentFiles
+          );
+          this.modelMaxConcurrentChunks = parseIntOrDefault(
+            settings["model_max_number_of_concurrent_uploading_file_chunks"],
+            this.modelMaxConcurrentChunks
+          );
+          this.modelChunkSizeMiB = parseIntOrDefault(
+            settings["model_multipart_upload_chunk_size_mib"],
+            this.modelChunkSizeMiB
+          );
           this.maxConcurrentChunks = parseIntOrDefault(
             settings["max_number_of_concurrent_uploading_file_chunks"],
             this.maxConcurrentChunks
@@ -229,6 +249,17 @@ export class AdminSettingsComponent implements OnInit {
     return Math.ceil(this.maxFileSizeMiB / this.chunkSizeMiB);
   }
 
+  get modelPartsAtMax(): number {
+    if (!this.modelMaxFileSizeMiB || !this.modelChunkSizeMiB) return 0;
+    return Math.ceil(this.modelMaxFileSizeMiB / this.modelChunkSizeMiB);
+  }
+
+  get modelRequiredMinPartSizeMiB(): number {
+    if (!this.modelMaxFileSizeMiB) return this.MIN_PART_SIZE_MiB;
+    const byPartsLimit = Math.ceil(this.modelMaxFileSizeMiB / this.MAX_TOTAL_PARTS);
+    return Math.max(this.MIN_PART_SIZE_MiB, byPartsLimit);
+  }
+
   get requiredMinPartSizeMiB(): number {
     if (!this.maxFileSizeMiB) return this.MIN_PART_SIZE_MiB;
     const byPartsLimit = Math.ceil(this.maxFileSizeMiB / this.MAX_TOTAL_PARTS);
@@ -242,6 +273,10 @@ export class AdminSettingsComponent implements OnInit {
     }
     if (
       this.maxFileSizeMiB < 1 ||
+      this.modelMaxFileSizeMiB < 1 ||
+      this.modelMaxConcurrentFiles < 1 ||
+      this.modelMaxConcurrentChunks < 1 ||
+      this.modelChunkSizeMiB < 1 ||
       this.maxConcurrentFiles < 1 ||
       this.maxConcurrentChunks < 1 ||
       this.chunkSizeMiB < 1
@@ -258,12 +293,36 @@ export class AdminSettingsComponent implements OnInit {
       return;
     }
 
+    if (this.modelPartsAtMax > this.MAX_TOTAL_PARTS) {
+      this.message.error(
+        `This setting would create ${this.modelPartsAtMax.toLocaleString()} model parts (exceeds 10,000 limit). ` +
+          `Increase "Model Part Size" to at least ${this.modelRequiredMinPartSizeMiB} MiB or reduce "Model File Size".`
+      );
+      return;
+    }
+
     const saveRequests = [
       this.adminSettingsService.updateSetting(
         "max_number_of_concurrent_uploading_file",
         this.maxConcurrentFiles.toString()
       ),
       this.adminSettingsService.updateSetting("single_file_upload_max_size_mib", this.maxFileSizeMiB.toString()),
+      this.adminSettingsService.updateSetting(
+        "model_single_file_upload_max_size_mib",
+        this.modelMaxFileSizeMiB.toString()
+      ),
+      this.adminSettingsService.updateSetting(
+        "model_max_number_of_concurrent_uploading_file",
+        this.modelMaxConcurrentFiles.toString()
+      ),
+      this.adminSettingsService.updateSetting(
+        "model_max_number_of_concurrent_uploading_file_chunks",
+        this.modelMaxConcurrentChunks.toString()
+      ),
+      this.adminSettingsService.updateSetting(
+        "model_multipart_upload_chunk_size_mib",
+        this.modelChunkSizeMiB.toString()
+      ),
       this.adminSettingsService.updateSetting(
         "max_number_of_concurrent_uploading_file_chunks",
         this.maxConcurrentChunks.toString()
@@ -274,8 +333,8 @@ export class AdminSettingsComponent implements OnInit {
     forkJoin(saveRequests)
       .pipe(untilDestroyed(this))
       .subscribe({
-        next: () => this.message.success("Dataset upload settings saved successfully."),
-        error: () => this.message.error("Failed to save dataset settings."),
+        next: () => this.message.success("Upload settings saved successfully."),
+        error: () => this.message.error("Failed to save upload settings."),
       });
   }
 
@@ -283,11 +342,15 @@ export class AdminSettingsComponent implements OnInit {
     [
       "max_number_of_concurrent_uploading_file",
       "single_file_upload_max_size_mib",
+      "model_single_file_upload_max_size_mib",
+      "model_max_number_of_concurrent_uploading_file",
+      "model_max_number_of_concurrent_uploading_file_chunks",
+      "model_multipart_upload_chunk_size_mib",
       "max_number_of_concurrent_uploading_file_chunks",
       "multipart_upload_chunk_size_mib",
     ].forEach(setting => this.adminSettingsService.resetSetting(setting).pipe(untilDestroyed(this)).subscribe({}));
 
-    this.message.info("Resetting dataset settings...");
+    this.message.info("Resetting upload settings...");
     setTimeout(() => window.location.reload(), this.RELOAD_DELAY);
   }
 

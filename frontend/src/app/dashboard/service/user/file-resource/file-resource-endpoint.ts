@@ -26,14 +26,23 @@ export interface FileResourceEndpoint {
   readonly baseUrl: string;
   /** Query-param name carrying the resource name, e.g. "datasetName". */
   readonly nameParamKey: string;
+  /** site_settings key holding this resource's per-file upload ceiling, in MiB. */
+  readonly maxFileSizeSettingKey: string;
+  /** Fallback ceiling in MiB when the setting is absent or unparsable. */
+  readonly defaultMaxFileSizeMiB: number;
 }
 
 export const DATASET_FILE_RESOURCE_ENDPOINT: FileResourceEndpoint = {
   baseUrl: "dataset",
   nameParamKey: "datasetName",
+  maxFileSizeSettingKey: "single_file_upload_max_size_mib",
+  defaultMaxFileSizeMiB: 20,
 };
 
 export const MODEL_FILE_RESOURCE_ENDPOINT: FileResourceEndpoint = {
   baseUrl: "model",
   nameParamKey: "modelName",
+  // Model weights are GiB-scale, so models carry a much higher ceiling than datasets.
+  maxFileSizeSettingKey: "model_single_file_upload_max_size_mib",
+  defaultMaxFileSizeMiB: 2048,
 };

@@ -458,6 +458,76 @@ class ModelResourceSpec
     }
   }
 
+  "updateModelFramework" should "persist a supported framework" in {
+    val created = createWith("framework-update", "pytorch", "torchscript")
+    modelResource.updateModelFramework(
+      ModelResource.ModelFrameworkModification(created.model.getMid, "onnx"),
+      sessionUser
+    )
+    modelResource.getModel(created.model.getMid, sessionUser).model.getFramework shouldEqual "onnx"
+  }
+
+  it should "accept the other framework for models outside the known set" in {
+    val created = createWith("framework-other", "pytorch", "torchscript")
+    modelResource.updateModelFramework(
+      ModelResource.ModelFrameworkModification(created.model.getMid, "other"),
+      sessionUser
+    )
+    modelResource.getModel(created.model.getMid, sessionUser).model.getFramework shouldEqual "other"
+  }
+
+  it should "reject an unsupported framework" in {
+    val created = createWith("framework-bad", "pytorch", "torchscript")
+    assertThrows[BadRequestException] {
+      modelResource.updateModelFramework(
+        ModelResource.ModelFrameworkModification(created.model.getMid, "caffe"),
+        sessionUser
+      )
+    }
+  }
+
+  it should "forbid a user without write access" in {
+    val created = createWith("framework-forbidden", "pytorch", "torchscript")
+    assertThrows[ForbiddenException] {
+      modelResource.updateModelFramework(
+        ModelResource.ModelFrameworkModification(created.model.getMid, "onnx"),
+        sessionUser2
+      )
+    }
+  }
+
+  "updateModelFormat" should "persist a supported format" in {
+    val created = createWith("format-update", "pytorch", "torchscript")
+    modelResource.updateModelFormat(
+      ModelResource.ModelFormatModification(created.model.getMid, "safetensors"),
+      sessionUser
+    )
+    modelResource
+      .getModel(created.model.getMid, sessionUser)
+      .model
+      .getFormat shouldEqual "safetensors"
+  }
+
+  it should "reject an unsupported format" in {
+    val created = createWith("format-bad", "pytorch", "torchscript")
+    assertThrows[BadRequestException] {
+      modelResource.updateModelFormat(
+        ModelResource.ModelFormatModification(created.model.getMid, "h5"),
+        sessionUser
+      )
+    }
+  }
+
+  it should "forbid a user without write access" in {
+    val created = createWith("format-forbidden", "pytorch", "torchscript")
+    assertThrows[ForbiddenException] {
+      modelResource.updateModelFormat(
+        ModelResource.ModelFormatModification(created.model.getMid, "onnx"),
+        sessionUser2
+      )
+    }
+  }
+
   // ===========================================================================
   // getPublicModel / listModels public merge
   // ===========================================================================
