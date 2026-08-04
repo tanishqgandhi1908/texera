@@ -22,6 +22,10 @@ import { NgxFileDropEntry } from "ngx-file-drop";
 import { NzModalService } from "ng-zorro-antd/modal";
 import { AdminSettingsService } from "../../../service/admin/settings/admin-settings.service";
 import { MultipartUploadService } from "../../../service/user/file-resource/multipart-upload.service";
+import {
+  DATASET_FILE_RESOURCE_ENDPOINT,
+  MODEL_FILE_RESOURCE_ENDPOINT,
+} from "../../../service/user/file-resource/file-resource-endpoint";
 import { NotificationService } from "../../../../common/service/notification/notification.service";
 import { FileUploadItem } from "../../../type/dashboard-file.interface";
 import { FilesUploaderComponent } from "./files-uploader.component";
@@ -90,20 +94,54 @@ describe("FilesUploaderComponent", () => {
     component.resourceId = 7;
   });
 
-  it("keeps the default upload size limit when the public setting is missing, and parses it when present", () => {
-    const build = (value: string | null) =>
-      new FilesUploaderComponent(
-        { error: vi.fn() } as unknown as NotificationService,
-        { getPublicSetting: vi.fn().mockReturnValue(of(value)) } as unknown as AdminSettingsService,
-        multipartUploadService as unknown as MultipartUploadService,
-        { create: vi.fn() } as unknown as NzModalService
-      );
+  const buildUploader = (value: string | null, endpoint = DATASET_FILE_RESOURCE_ENDPOINT) => {
+    const c = new FilesUploaderComponent(
+      { error: vi.fn() } as unknown as NotificationService,
+      { getPublicSetting: vi.fn().mockReturnValue(of(value)) } as unknown as AdminSettingsService,
+      multipartUploadService as unknown as MultipartUploadService,
+      { create: vi.fn() } as unknown as NzModalService
+    );
+    c.endpoint = endpoint;
+    c.ngOnInit();
+    return c;
+  };
 
-    expect(build(null).singleFileUploadMaxSizeMiB).toBe(20);
-    expect(build("128").singleFileUploadMaxSizeMiB).toBe(128);
+  it("keeps the default upload size limit when the public setting is missing, and parses it when present", () => {
+    expect(buildUploader(null).singleFileUploadMaxSizeMiB).toBe(20);
+    expect(buildUploader("128").singleFileUploadMaxSizeMiB).toBe(128);
     // an unparsable value keeps the default, but a stored 0 is honoured
-    expect(build("nope").singleFileUploadMaxSizeMiB).toBe(20);
-    expect(build("0").singleFileUploadMaxSizeMiB).toBe(0);
+    expect(buildUploader("nope").singleFileUploadMaxSizeMiB).toBe(20);
+    expect(buildUploader("0").singleFileUploadMaxSizeMiB).toBe(0);
+  });
+
+  it("reads the model limit key and its larger default when uploading to a model", () => {
+    const admin = { getPublicSetting: vi.fn().mockReturnValue(of(null)) } as unknown as AdminSettingsService;
+    const c = new FilesUploaderComponent(
+      { error: vi.fn() } as unknown as NotificationService,
+      admin,
+      multipartUploadService as unknown as MultipartUploadService,
+      { create: vi.fn() } as unknown as NzModalService
+    );
+    c.endpoint = MODEL_FILE_RESOURCE_ENDPOINT;
+    c.ngOnInit();
+
+    expect(admin.getPublicSetting).toHaveBeenCalledWith("model_single_file_upload_max_size_mib");
+    expect(c.singleFileUploadMaxSizeMiB).toBe(2048);
+  });
+
+  it("reads the dataset limit key when uploading to a dataset", () => {
+    const admin = { getPublicSetting: vi.fn().mockReturnValue(of(null)) } as unknown as AdminSettingsService;
+    const c = new FilesUploaderComponent(
+      { error: vi.fn() } as unknown as NotificationService,
+      admin,
+      multipartUploadService as unknown as MultipartUploadService,
+      { create: vi.fn() } as unknown as NzModalService
+    );
+    c.endpoint = DATASET_FILE_RESOURCE_ENDPOINT;
+    c.ngOnInit();
+
+    expect(admin.getPublicSetting).toHaveBeenCalledWith("single_file_upload_max_size_mib");
+    expect(c.singleFileUploadMaxSizeMiB).toBe(20);
   });
 
   it("asks to resume failed multipart files and skip completed matching files in one retry batch", async () => {

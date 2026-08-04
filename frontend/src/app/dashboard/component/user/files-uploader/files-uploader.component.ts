@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { Component, EventEmitter, Input, Output } from "@angular/core";
+import { Component, EventEmitter, Input, OnInit, Output } from "@angular/core";
 import { firstValueFrom } from "rxjs";
 import { NgxFileDropEntry, NgxFileDropModule } from "ngx-file-drop";
 import { NzModalRef, NzModalService } from "ng-zorro-antd/modal";
@@ -59,7 +59,7 @@ import { ɵNzTransitionPatchDirective } from "ng-zorro-antd/core/transition-patc
     ɵNzTransitionPatchDirective,
   ],
 })
-export class FilesUploaderComponent {
+export class FilesUploaderComponent implements OnInit {
   @Input() showUploadAlert: boolean = false;
   /**
    * Optional context supplied by the embedding component so the uploader can address staged files
@@ -79,17 +79,21 @@ export class FilesUploaderComponent {
   fileUploadingFinished: boolean = false;
   fileUploadBannerType: "error" | "success" | "info" | "warning" = "success";
   fileUploadBannerMessage: string = "";
-  singleFileUploadMaxSizeMiB: number = 20;
+  singleFileUploadMaxSizeMiB: number = DATASET_FILE_RESOURCE_ENDPOINT.defaultMaxFileSizeMiB;
 
   constructor(
     private notificationService: NotificationService,
     private adminSettingsService: AdminSettingsService,
     private multipartUploadService: MultipartUploadService,
     private modal: NzModalService
-  ) {
-    // A missing key or failed fetch keeps the initializer default above.
+  ) {}
+
+  // Reads the ceiling in ngOnInit, not the constructor: `endpoint` is an @Input and
+  // decides which setting key and fallback apply.
+  ngOnInit(): void {
+    this.singleFileUploadMaxSizeMiB = this.endpoint.defaultMaxFileSizeMiB;
     this.adminSettingsService
-      .getPublicSetting("single_file_upload_max_size_mib")
+      .getPublicSetting(this.endpoint.maxFileSizeSettingKey)
       .pipe(untilDestroyed(this))
       .subscribe({
         next: value => (this.singleFileUploadMaxSizeMiB = parseIntOrDefault(value, this.singleFileUploadMaxSizeMiB)),

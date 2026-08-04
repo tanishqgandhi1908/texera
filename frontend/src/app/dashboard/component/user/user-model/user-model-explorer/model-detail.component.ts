@@ -520,14 +520,14 @@ export class ModelDetailComponent implements OnInit {
   // queue (`activeUploads < NaN` is always false).
   private loadUploadSettings(): void {
     const settings: Array<[string, (value: number) => void]> = [
-      ["multipart_upload_chunk_size_mib", value => (this.chunkSizeMiB = value)],
-      ["max_number_of_concurrent_uploading_file_chunks", value => (this.maxConcurrentChunks = value)],
-      ["max_number_of_concurrent_uploading_file", value => (this.maxConcurrentFiles = value)],
+      ["model_multipart_upload_chunk_size_mib", value => (this.chunkSizeMiB = value)],
+      ["model_max_number_of_concurrent_uploading_file_chunks", value => (this.maxConcurrentChunks = value)],
+      ["model_max_number_of_concurrent_uploading_file", value => (this.maxConcurrentFiles = value)],
     ];
     const current: Record<string, number> = {
-      multipart_upload_chunk_size_mib: this.chunkSizeMiB,
-      max_number_of_concurrent_uploading_file_chunks: this.maxConcurrentChunks,
-      max_number_of_concurrent_uploading_file: this.maxConcurrentFiles,
+      model_multipart_upload_chunk_size_mib: this.chunkSizeMiB,
+      model_max_number_of_concurrent_uploading_file_chunks: this.maxConcurrentChunks,
+      model_max_number_of_concurrent_uploading_file: this.maxConcurrentFiles,
     };
     settings.forEach(([key, assign]) => {
       this.adminSettingsService

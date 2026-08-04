@@ -649,4 +649,24 @@ describe("ModelDetailComponent", () => {
       expect(component.likeCount).toBe(before);
     });
   });
+
+  describe("upload settings", () => {
+    it("reads the model-specific upload keys, not the dataset ones", () => {
+      const settingsService = TestBed.inject(AdminSettingsService) as unknown as {
+        getPublicSetting: ReturnType<typeof vi.fn>;
+      };
+      fixture.detectChanges();
+
+      const requested = settingsService.getPublicSetting.mock.calls.map((c: unknown[]) => c[0]);
+      expect(requested).toEqual(
+        expect.arrayContaining([
+          "model_multipart_upload_chunk_size_mib",
+          "model_max_number_of_concurrent_uploading_file_chunks",
+          "model_max_number_of_concurrent_uploading_file",
+        ])
+      );
+      expect(requested).not.toContain("multipart_upload_chunk_size_mib");
+      expect(requested).not.toContain("max_number_of_concurrent_uploading_file");
+    });
+  });
 });

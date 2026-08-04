@@ -45,6 +45,9 @@ class DefaultsConfigSpec extends AnyFlatSpec with Matchers {
     ifUnset("DATASET_SINGLE_FILE_UPLOAD_MAX_SIZE_MIB")(
       defaults.get("single_file_upload_max_size_mib") shouldBe Some("20")
     )
+    ifUnset("MODEL_SINGLE_FILE_UPLOAD_MAX_SIZE_MIB")(
+      defaults.get("model_single_file_upload_max_size_mib") shouldBe Some("2048")
+    )
     ifUnset("GUI_TABS_HUB_ENABLED")(defaults.get("hub_enabled") shouldBe Some("true"))
     // management-only keys are flattened too (used by reset + the startup seeder)
     ifUnset("OPERATOR_CSV_PARSER_MAX_COLUMNS")(
@@ -74,11 +77,18 @@ class DefaultsConfigSpec extends AnyFlatSpec with Matchers {
     val datasetKeys = DefaultsConfig.keysUnderSections(Set("dataset"))
     datasetKeys should contain("single_file_upload_max_size_mib")
     datasetKeys should not contain "logo"
+    // the model limit is a separate key, not the dataset one
+    datasetKeys should not contain "model_single_file_upload_max_size_mib"
+
+    val modelKeys = DefaultsConfig.keysUnderSections(Set("model"))
+    modelKeys should contain("model_single_file_upload_max_size_mib")
+    // the collision guard depends on model leaves staying distinct from dataset ones
+    modelKeys.intersect(DefaultsConfig.keysUnderSections(Set("dataset"))) shouldBe empty
   }
 
   it should "union multiple sections and be empty for an unknown section" in {
-    val union = DefaultsConfig.keysUnderSections(Set("gui", "dataset"))
-    union should contain allOf ("logo", "single_file_upload_max_size_mib")
+    val union = DefaultsConfig.keysUnderSections(Set("gui", "dataset", "model"))
+    union should contain allOf ("logo", "single_file_upload_max_size_mib", "model_single_file_upload_max_size_mib")
     // every returned key exists in allDefaults under the same short name
     union.subsetOf(DefaultsConfig.allDefaults.keySet) shouldBe true
 

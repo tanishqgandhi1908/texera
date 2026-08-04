@@ -98,8 +98,8 @@ object ModelResource {
       .getInstance()
       .createDSLContext()
 
-  private def singleFileUploadMaxBytes(defaultMiB: Long = 20L): Long =
-    SiteSettings.getLong("single_file_upload_max_size_mib", defaultMiB) * 1024L * 1024L
+  private def singleFileUploadMaxBytes(defaultMiB: Long = 2048L): Long =
+    SiteSettings.getLong("model_single_file_upload_max_size_mib", defaultMiB) * 1024L * 1024L
 
   /**
     * Helper function to get the model from DB using mid

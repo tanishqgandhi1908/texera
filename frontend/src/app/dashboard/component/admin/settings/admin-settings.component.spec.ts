@@ -48,9 +48,10 @@ describe("AdminSettingsComponent", () => {
     expect(component).toBeTruthy();
   });
 
-  it("renders MiB unit beside both size-based inputs", () => {
+  it("renders MiB unit beside every size-based input", () => {
     const units = fixture.nativeElement.querySelectorAll(".input-with-unit .unit");
-    expect(units.length).toBe(2);
+    // dataset file size + part size, model file size + part size
+    expect(units.length).toBe(4);
     units.forEach((el: HTMLElement) => {
       expect(el.textContent?.trim()).toBe("MiB");
     });
@@ -67,6 +68,10 @@ describe("AdminSettingsComponent", () => {
       home_enabled: "false",
       max_number_of_concurrent_uploading_file: "5",
       single_file_upload_max_size_mib: "128",
+      model_single_file_upload_max_size_mib: "4096",
+      model_max_number_of_concurrent_uploading_file: "2",
+      model_max_number_of_concurrent_uploading_file_chunks: "4",
+      model_multipart_upload_chunk_size_mib: "128",
       max_number_of_concurrent_uploading_file_chunks: "7",
       multipart_upload_chunk_size_mib: "64",
       csv_parser_max_columns: "4096",
@@ -268,7 +273,7 @@ describe("AdminSettingsComponent", () => {
     });
 
     describe("dataset settings", () => {
-      it("saveDatasetSettings PUTs the four upload settings and notifies success", () => {
+      it("saveDatasetSettings PUTs every upload setting and notifies success", () => {
         completeLoad(); // defaults (20 / 3 / 10 / 50) are valid
 
         component.saveDatasetSettings();
@@ -281,10 +286,14 @@ describe("AdminSettingsComponent", () => {
         };
         expectPut("max_number_of_concurrent_uploading_file", "3");
         expectPut("single_file_upload_max_size_mib", "20");
+        expectPut("model_single_file_upload_max_size_mib", "2048");
+        expectPut("model_max_number_of_concurrent_uploading_file", "3");
+        expectPut("model_max_number_of_concurrent_uploading_file_chunks", "10");
+        expectPut("model_multipart_upload_chunk_size_mib", "50");
         expectPut("max_number_of_concurrent_uploading_file_chunks", "10");
         expectPut("multipart_upload_chunk_size_mib", "50");
 
-        expect(msgSuccess).toHaveBeenCalledWith("Dataset upload settings saved successfully.");
+        expect(msgSuccess).toHaveBeenCalledWith("Upload settings saved successfully.");
       });
 
       it("saveDatasetSettings rejects non-positive values without saving", () => {
@@ -313,10 +322,14 @@ describe("AdminSettingsComponent", () => {
 
         component.saveDatasetSettings();
 
-        // Fail the last of the four PUTs so forkJoin errors with every request flushed.
+        // Fail the last PUT so forkJoin errors with every request flushed.
         const keys = [
           "max_number_of_concurrent_uploading_file",
           "single_file_upload_max_size_mib",
+          "model_single_file_upload_max_size_mib",
+          "model_max_number_of_concurrent_uploading_file",
+          "model_max_number_of_concurrent_uploading_file_chunks",
+          "model_multipart_upload_chunk_size_mib",
           "max_number_of_concurrent_uploading_file_chunks",
           "multipart_upload_chunk_size_mib",
         ];
@@ -325,10 +338,21 @@ describe("AdminSettingsComponent", () => {
           if (i === keys.length - 1) req.flush("boom", HTTP_ERROR);
           else req.flush(null);
         });
-        expect(msgError).toHaveBeenCalledWith("Failed to save dataset settings.");
+        expect(msgError).toHaveBeenCalledWith("Failed to save upload settings.");
       });
 
-      it("resetDatasetSettings POSTs a reset for all four upload settings", () => {
+      it("rejects a model configuration that would exceed the 10,000-part limit", () => {
+        completeLoad();
+        component.modelMaxFileSizeMiB = 5_000_000;
+        component.modelChunkSizeMiB = 5;
+
+        component.saveDatasetSettings();
+
+        httpTestingController.expectNone(updateUrl("model_single_file_upload_max_size_mib"));
+        expect(msgError).toHaveBeenCalledWith(expect.stringContaining("model parts (exceeds 10,000 limit)"));
+      });
+
+      it("resetDatasetSettings POSTs a reset for every upload setting", () => {
         completeLoad();
 
         component.resetDatasetSettings();
@@ -336,10 +360,14 @@ describe("AdminSettingsComponent", () => {
         [
           "max_number_of_concurrent_uploading_file",
           "single_file_upload_max_size_mib",
+          "model_single_file_upload_max_size_mib",
+          "model_max_number_of_concurrent_uploading_file",
+          "model_max_number_of_concurrent_uploading_file_chunks",
+          "model_multipart_upload_chunk_size_mib",
           "max_number_of_concurrent_uploading_file_chunks",
           "multipart_upload_chunk_size_mib",
         ].forEach(key => httpTestingController.expectOne(resetUrl(key)).flush(null));
-        expect(msgInfo).toHaveBeenCalledWith("Resetting dataset settings...");
+        expect(msgInfo).toHaveBeenCalledWith("Resetting upload settings...");
       });
     });
 

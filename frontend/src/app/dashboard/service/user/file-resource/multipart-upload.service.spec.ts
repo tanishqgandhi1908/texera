@@ -32,7 +32,12 @@ const API = "api";
  * A second endpoint that is neither dataset nor model. Using a synthetic one proves the engine is
  * genuinely parameterized rather than accidentally dataset-shaped.
  */
-const WIDGET_ENDPOINT: FileResourceEndpoint = { baseUrl: "widget", nameParamKey: "widgetName" };
+const WIDGET_ENDPOINT: FileResourceEndpoint = {
+  baseUrl: "widget",
+  nameParamKey: "widgetName",
+  maxFileSizeSettingKey: "widget_single_file_upload_max_size_mib",
+  defaultMaxFileSizeMiB: 64,
+};
 
 describe("MultipartUploadService", () => {
   let service: MultipartUploadService;
