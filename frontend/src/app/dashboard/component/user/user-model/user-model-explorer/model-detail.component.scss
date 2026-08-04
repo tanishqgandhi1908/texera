@@ -254,18 +254,34 @@ nz-select {
 }
 
 // Tabbed layout, mirroring dataset-detail.component.scss (#6494).
+nz-tabs {
+  margin-top: 6px;
+}
+
+::ng-deep .ant-tabs-nav {
+  padding-left: 16px;
+}
+
 .data-card-tab-content {
   height: 100%;
   overflow-y: auto;
   padding-bottom: 24px;
 }
 
+// The Settings tab shares the tab area's bounded height with the Data Card
+// tab. Give its content its own scroll region (mirroring the height:100% +
+// overflow-y:auto pattern used by other dashboard pages) so both cards can
+// be scrolled fully into view, with bottom padding for breathing room below
+// the last card.
 .settings-tab-content {
   height: 100%;
   overflow-y: auto;
   padding-bottom: 24px;
 }
 
+// Two side-by-side cards filling the full tab width: a wide description card
+// and a narrower stats card. The flex grow ratio is the single source of
+// truth for their proportions (basis 0), so no width/max-width competes.
 .data-card-columns {
   display: flex;
   align-items: flex-start;
@@ -286,6 +302,8 @@ nz-select {
   min-width: 0;
 }
 
+// Left card takes ~3/4 of the row, stats card ~1/4 — grow ratio with basis 0
+// so the split is exact and content-independent.
 .data-card-main {
   flex: 3 1 0;
 }
@@ -294,6 +312,17 @@ nz-select {
   flex: 1 1 0;
 }
 
+// Stack the two cards full-width on narrow viewports.
+@media (max-width: 768px) {
+  .data-card-columns {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+// Matches the app's standard card-section heading convention (e.g. the
+// Settings tab's "General" card title): bold, dark, slightly larger than
+// body text, with a clear gap before the content below.
 .data-card-heading {
   font-size: 18px;
   font-weight: 600;
@@ -301,17 +330,21 @@ nz-select {
   margin: 0 0 20px;
 }
 
+// Plain text, no box/border styling — larger size keeps it readable as prose.
 .data-card-description {
   font-size: 16px;
   line-height: 1.6;
   margin-bottom: 32px;
 }
 
+// Empty state: muted grey italic so it reads as "nothing here yet", not broken.
 .empty-description {
   color: rgba(0, 0, 0, 0.4);
   font-style: italic;
 }
 
+// Stats as a full-width vertical list, one fact per row, avoiding the awkward
+// wrapping of the previous cramped horizontal layout.
 .data-card-stats {
   display: flex;
   flex-direction: column;
@@ -407,8 +440,8 @@ nz-select {
   padding: 16px;
   background: #f6f8fa;
   border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  font-family: monospace;
+  border-radius: 8px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   font-size: 12px;
   line-height: 1.6;
   overflow-x: auto;
@@ -418,4 +451,30 @@ nz-select {
 .usage-snippet-actions {
   display: flex;
   justify-content: flex-end;
+}
+
+// Token colours follow the Python UDF editor's light theme.
+.tok-keyword {
+  color: #0000ff;
+}
+
+.tok-string {
+  color: #a31515;
+}
+
+.tok-comment {
+  color: #008000;
+  font-style: italic;
+}
+
+.tok-number {
+  color: #098658;
+}
+
+.tok-builtin {
+  color: #267f99;
+}
+
+.tok-plain {
+  color: #24292f;
 }

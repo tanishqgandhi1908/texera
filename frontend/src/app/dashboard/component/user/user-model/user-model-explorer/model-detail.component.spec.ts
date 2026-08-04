@@ -771,11 +771,23 @@ describe("ModelDetailComponent", () => {
   });
 
   describe("usage tab", () => {
-    it("generates a snippet carrying the resolved model path", () => {
+    it("generates a snippet that reads the model through the property-panel variable", () => {
       fixture.detectChanges();
 
-      expect(component.usageSnippet).toContain('MODEL_PATH = "/models/');
+      expect(component.modelVariable).toBe("resnet");
+      expect(component.usageSnippet).toContain("os.path.join(resnet,");
       expect(component.usageSnippet).toContain("class ProcessTupleOperator(UDFOperatorV2):");
+      // the mount replaces logical-path resolution entirely
+      expect(component.usageSnippet).not.toContain("/models/");
+    });
+
+    it("exposes the snippet as coloured tokens without losing text", () => {
+      fixture.detectChanges();
+
+      const rebuilt = component.usageSnippetLines.map(l => l.map(t => t.text).join("")).join("\n");
+      expect(rebuilt).toBe(component.usageSnippet);
+      expect(component.usageSnippetLines.some(l => l.some(t => t.kind === "keyword"))).toBe(true);
+      expect(component.usageSnippetLines.some(l => l.some(t => t.kind === "comment"))).toBe(true);
     });
 
     it("reports whether the framework/format pair has a tailored loader", () => {

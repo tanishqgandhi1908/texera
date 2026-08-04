@@ -55,7 +55,13 @@ import {
   validateModelName,
 } from "../../../../service/user/model/model.service";
 import { USER_MODEL } from "../../../../../app-routing.constant";
-import { buildModelUsageSnippet, hasKnownLoader } from "./model-usage-snippet";
+import {
+  buildModelUsageSnippet,
+  hasKnownLoader,
+  modelVariableName,
+  SnippetToken,
+  tokenizeSnippet,
+} from "./model-usage-snippet";
 import { extractErrorMessage } from "../../../../../common/util/error";
 import { DownloadService } from "../../../../service/user/download/download.service";
 import { NotificationService } from "../../../../../common/service/notification/notification.service";
@@ -300,13 +306,20 @@ export class ModelDetailComponent implements OnInit {
 
   get usageSnippet(): string {
     return buildModelUsageSnippet({
-      ownerEmail: this.ownerEmail,
       modelName: this.modelName,
-      versionName: this.selectedVersion?.name ?? "",
       fileRelativePath: this.snippetFileRelativePath,
       framework: this.modelFramework,
       format: this.modelFormat,
     });
+  }
+
+  /** The snippet split into coloured tokens, one array per line. */
+  get usageSnippetLines(): SnippetToken[][] {
+    return tokenizeSnippet(this.usageSnippet);
+  }
+
+  get modelVariable(): string {
+    return modelVariableName(this.modelName);
   }
 
   get snippetIsTailored(): boolean {

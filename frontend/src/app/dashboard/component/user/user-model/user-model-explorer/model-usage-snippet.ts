@@ -17,130 +17,303 @@
  * under the License.
  */
 
-/** Where a model file lives, as the logical path a UDF resolves. */
+/**
+ * What the snippet needs to know about a model. The model is mounted into the
+ * computing unit, and the UDF reads it through the variable declared in the
+ * operator's property panel — so no logical path appears in the snippet.
+ */
 export interface ModelSnippetContext {
-  ownerEmail: string;
   modelName: string;
-  versionName: string;
-  /** Path of the chosen file relative to the version root, e.g. "weights/model.pt". */
+  /** Path of the weights file relative to the model root, e.g. "weights/model.pt". */
   fileRelativePath: string;
   framework: string | undefined;
   format: string | undefined;
 }
 
-/** Logical path of a model file: /models/ownerEmail/modelName/versionName/relativePath */
-export function modelLogicalPath(ctx: ModelSnippetContext): string {
-  const relative = ctx.fileRelativePath.replace(/^\/+/, "");
-  return `/models/${ctx.ownerEmail}/${ctx.modelName}/${ctx.versionName}/${relative}`;
+/**
+ * Variable name suggested for the operator's property panel, derived from the
+ * model name so the snippet reads like the user's own code.
+ */
+export function modelVariableName(modelName: string): string {
+  const identifier = modelName
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  // Python identifiers cannot start with a digit, and an empty name is useless.
+  if (identifier === "") {
+    return "model_dir";
+  }
+  return /^[0-9]/.test(identifier) ? `model_${identifier}` : identifier;
 }
 
-// The load call for a framework/format pair. Only the pairs that actually occur are
-// listed; anything else falls back to the generic byte-stream form below.
-const LOADERS: ReadonlyArray<{
+interface Loader {
   framework: string;
   format: string;
   imports: string[];
-  load: (local: string) => string;
-}> = [
+  /** Lines that load the model, given the expression for the weights file path. */
+  load: (fileExpr: string) => string[];
+}
+
+// The load call for a framework/format pair. Only the pairs that actually occur
+// are listed; anything else falls back to the generic form below.
+const LOADERS: ReadonlyArray<Loader> = [
   {
     framework: "pytorch",
     format: "torchscript",
     imports: ["import torch"],
-    load: local => `model = torch.jit.load(${local})\nmodel.eval()`,
+    load: file => [
+      "# TorchScript carries its own architecture, so it loads standalone.",
+      `self.model = torch.jit.load(${file})`,
+      "# Inference mode: disables dropout and batch-norm updates.",
+      "self.model.eval()",
+    ],
   },
   {
     framework: "pytorch",
     format: "state-dict",
     imports: ["import torch"],
-    load: local =>
-      `state_dict = torch.load(${local}, map_location="cpu")\n` +
-      `# build your architecture first, then load the weights into it\n` +
-      `# model.load_state_dict(state_dict)`,
+    load: file => [
+      "# A state dict holds weights only, so build the architecture first",
+      "# and then copy the weights into it.",
+      `state_dict = torch.load(${file}, map_location="cpu")`,
+      "# self.model = MyNetwork()",
+      "# self.model.load_state_dict(state_dict)",
+      "# self.model.eval()",
+    ],
   },
   {
     framework: "pytorch",
     format: "safetensors",
     imports: ["from safetensors.torch import load_file"],
-    load: local => `state_dict = load_file(${local})\n# model.load_state_dict(state_dict)`,
+    load: file => [
+      "# safetensors stores tensors only -- no pickled Python code.",
+      `state_dict = load_file(${file})`,
+      "# self.model = MyNetwork()",
+      "# self.model.load_state_dict(state_dict)",
+      "# self.model.eval()",
+    ],
   },
   {
     framework: "tensorflow",
     format: "savedmodel",
     imports: ["import tensorflow as tf"],
-    load: local => `model = tf.saved_model.load(${local})`,
+    load: file => [
+      "# A SavedModel is a directory, so point at the model root, not a file.",
+      `self.model = tf.saved_model.load(${file})`,
+    ],
   },
   {
     framework: "onnx",
     format: "onnx",
     imports: ["import onnxruntime as ort"],
-    load: local => `session = ort.InferenceSession(${local})\n# outputs = session.run(None, {"input": batch})`,
+    load: file => [
+      "# Create the session once in open(); it is the expensive step.",
+      `self.session = ort.InferenceSession(${file})`,
+      "self.input_name = self.session.get_inputs()[0].name",
+    ],
   },
   {
     framework: "sklearn",
     format: "joblib",
     imports: ["import joblib"],
-    load: local => `model = joblib.load(${local})`,
+    load: file => [`self.model = joblib.load(${file})`],
   },
   {
     framework: "sklearn",
     format: "pickle",
     imports: ["import pickle"],
-    load: local => `with open(${local}, "rb") as f:\n    model = pickle.load(f)`,
+    load: file => [
+      // Worth saying out loud: pickle executes code on load.
+      "# Only unpickle models you trust -- loading runs arbitrary code.",
+      `with open(${file}, "rb") as f:`,
+      "    self.model = pickle.load(f)",
+    ],
   },
 ];
 
-function loaderFor(framework: string | undefined, format: string | undefined) {
+function loaderFor(framework: string | undefined, format: string | undefined): Loader | undefined {
   return LOADERS.find(l => l.framework === framework && l.format === format);
-}
-
-/**
- * A Python snippet that loads this model inside a Texera UDF. Falls back to a
- * generic "you have the bytes, load them yourself" form when the framework and
- * format pair has no known loader — including when either is "other".
- */
-export function buildModelUsageSnippet(ctx: ModelSnippetContext): string {
-  const path = modelLogicalPath(ctx);
-  const loader = loaderFor(ctx.framework, ctx.format);
-
-  const header = [
-    "from pytexera import *",
-    "from pytexera.storage.dataset_file_document import DatasetFileDocument",
-    ...(loader?.imports ?? []),
-    "",
-    `MODEL_PATH = "${path}"`,
-    "",
-  ];
-
-  const body = loader
-    ? [
-        "class ProcessTupleOperator(UDFOperatorV2):",
-        "    def open(self):",
-        "        document = DatasetFileDocument(MODEL_PATH)",
-        "        with document.open() as model_file:",
-        `            ${loader.load("model_file").split("\n").join("\n            ")}`,
-        "",
-        "    @overrides",
-        "    def process_tuple(self, tuple_: Tuple, port: int) -> Iterator[Optional[TupleLike]]:",
-        "        # prediction = model(...)",
-        "        yield tuple_",
-      ]
-    : [
-        "class ProcessTupleOperator(UDFOperatorV2):",
-        "    def open(self):",
-        "        document = DatasetFileDocument(MODEL_PATH)",
-        "        with document.open() as model_file:",
-        "            payload = model_file.read()",
-        "            # load `payload` with whatever your framework expects",
-        "",
-        "    @overrides",
-        "    def process_tuple(self, tuple_: Tuple, port: int) -> Iterator[Optional[TupleLike]]:",
-        "        yield tuple_",
-      ];
-
-  return [...header, ...body].join("\n");
 }
 
 /** True when the pair has a tailored loader rather than the generic fallback. */
 export function hasKnownLoader(framework: string | undefined, format: string | undefined): boolean {
   return loaderFor(framework, format) !== undefined;
+}
+
+/** How predictions are produced, per framework — the part after loading. */
+function predictLines(framework: string | undefined): string[] {
+  switch (framework) {
+    case "pytorch":
+      return [
+        "# with torch.no_grad():",
+        '#     prediction = self.model(torch.tensor([tuple_["feature"]]))',
+        '# tuple_["prediction"] = prediction.item()',
+      ];
+    case "onnx":
+      return ["# outputs = self.session.run(None, {self.input_name: batch})", '# tuple_["prediction"] = outputs[0][0]'];
+    case "tensorflow":
+      return [
+        '# prediction = self.model(tf.constant([tuple_["feature"]]))',
+        '# tuple_["prediction"] = float(prediction)',
+      ];
+    case "sklearn":
+      return ['# prediction = self.model.predict([[tuple_["feature"]]])', '# tuple_["prediction"] = prediction[0]'];
+    default:
+      return ["# prediction = ...", '# tuple_["prediction"] = prediction'];
+  }
+}
+
+/**
+ * A Python UDF that loads this model. The model is mounted into the computing
+ * unit and exposed through the variable declared in the operator's property
+ * panel, so the snippet joins that variable with the file's relative path
+ * rather than resolving a logical path itself.
+ */
+export function buildModelUsageSnippet(ctx: ModelSnippetContext): string {
+  const variable = modelVariableName(ctx.modelName);
+  const loader = loaderFor(ctx.framework, ctx.format);
+  const relative = ctx.fileRelativePath.replace(/^\/+/, "");
+
+  // A SavedModel is loaded from its directory; everything else from a file.
+  const usesDirectory = ctx.format === "savedmodel";
+  const fileExpr = usesDirectory ? variable : "model_file";
+
+  const lines: string[] = [
+    "from pytexera import *",
+    "import os",
+    ...(loader?.imports ?? []),
+    "",
+    "",
+    "class ProcessTupleOperator(UDFOperatorV2):",
+    "    def open(self):",
+    `        # \`${variable}\` is the model variable declared in this operator's property`,
+    "        # panel. The model is mounted read-only in the computing unit, so it is an",
+    "        # ordinary filesystem path -- no download needed.",
+  ];
+
+  if (!usesDirectory) {
+    lines.push(`        model_file = os.path.join(${variable}, "${relative}")`);
+  }
+
+  // open() runs once per worker, so loading here keeps it off the per-tuple path.
+  const body = loader
+    ? loader.load(fileExpr)
+    : [
+        "# No loader is known for this framework/format pair, so read the bytes",
+        "# and hand them to whatever your framework expects.",
+        `with open(${fileExpr}, "rb") as f:`,
+        "    payload = f.read()",
+        "# self.model = my_framework.load(payload)",
+      ];
+  lines.push(...body.map(l => `        ${l}`));
+
+  lines.push(
+    "",
+    "    @overrides",
+    "    def process_tuple(self, tuple_: Tuple, port: int) -> Iterator[Optional[TupleLike]]:",
+    "        # open() already loaded the model, so predict per tuple here.",
+    ...predictLines(ctx.framework).map(l => `        ${l}`),
+    "        yield tuple_"
+  );
+
+  return lines.join("\n");
+}
+
+/** A highlighting token: `kind` maps to a CSS class in the template. */
+export interface SnippetToken {
+  text: string;
+  kind: "keyword" | "string" | "comment" | "number" | "builtin" | "plain";
+}
+
+const KEYWORDS = new Set([
+  "from",
+  "import",
+  "as",
+  "class",
+  "def",
+  "self",
+  "with",
+  "for",
+  "in",
+  "if",
+  "else",
+  "elif",
+  "return",
+  "yield",
+  "None",
+  "True",
+  "False",
+  "not",
+  "and",
+  "or",
+  "pass",
+  "raise",
+  "try",
+  "except",
+]);
+
+const BUILTINS = new Set(["open", "print", "len", "float", "int", "str", "range", "os"]);
+
+/**
+ * Splits one line of the generated Python into coloured tokens. Deliberately
+ * small: it only has to cover the constructs this generator emits, not Python
+ * as a whole, and the repo has no highlighter dependency to lean on.
+ */
+export function tokenizePythonLine(line: string): SnippetToken[] {
+  const commentAt = findCommentStart(line);
+  if (commentAt === 0) {
+    return [{ text: line, kind: "comment" }];
+  }
+  const code = commentAt === -1 ? line : line.slice(0, commentAt);
+  const comment = commentAt === -1 ? "" : line.slice(commentAt);
+
+  const tokens: SnippetToken[] = [];
+  // Words, quoted strings, numbers, or any single other character.
+  const pattern = /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')|([A-Za-z_][A-Za-z0-9_]*)|(\d+(?:\.\d+)?)|(\s+)|(.)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(code)) !== null) {
+    const [text, str, word, num, space] = match;
+    if (str !== undefined) {
+      tokens.push({ text, kind: "string" });
+    } else if (word !== undefined) {
+      tokens.push({ text, kind: KEYWORDS.has(word) ? "keyword" : BUILTINS.has(word) ? "builtin" : "plain" });
+    } else if (num !== undefined) {
+      tokens.push({ text, kind: "number" });
+    } else if (space !== undefined) {
+      tokens.push({ text, kind: "plain" });
+    } else {
+      tokens.push({ text, kind: "plain" });
+    }
+  }
+
+  if (comment) {
+    tokens.push({ text: comment, kind: "comment" });
+  }
+  return tokens;
+}
+
+/** Index of the `#` that starts a comment, ignoring `#` inside strings. */
+function findCommentStart(line: string): number {
+  let quote: string | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (quote) {
+      if (ch === "\\") {
+        i++;
+      } else if (ch === quote) {
+        quote = null;
+      }
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (ch === "#") {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/** The snippet as coloured tokens, one array per line. */
+export function tokenizeSnippet(snippet: string): SnippetToken[][] {
+  return snippet.split("\n").map(tokenizePythonLine);
 }

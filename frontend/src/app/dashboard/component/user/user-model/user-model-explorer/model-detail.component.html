@@ -516,8 +516,12 @@
       <nz-card class="settings-general-card">
         <h3 class="settings-card-title">Load this model in a UDF</h3>
         <p class="settings-hint">
+          Declare <code>{{ modelVariable }}</code> as a model variable in the Python UDF's property panel. The model is
+          mounted read-only in the computing unit, so the variable is an ordinary filesystem path.
+        </p>
+        <p class="settings-hint">
           Generated from this model's framework and format, targeting
-          <b>{{ selectedVersion?.name || "the latest version" }}</b>. Set framework and format in Settings to tailor it.
+          <b>{{ selectedVersion?.name || "the latest version" }}</b>. Change either in Settings to tailor it.
         </p>
         <p
           class="settings-hint"
@@ -538,7 +542,10 @@
             Copy
           </button>
         </div>
-        <pre class="usage-snippet">{{ usageSnippet }}</pre>
+        <pre class="usage-snippet"><code><ng-container *ngFor="let line of usageSnippetLines; let last = last"><span
+          *ngFor="let token of line"
+          [class]="'tok-' + token.kind">{{ token.text }}</span><ng-container *ngIf="!last">
+</ng-container></ng-container></code></pre>
       </nz-card>
     </div>
   </nz-tab>
