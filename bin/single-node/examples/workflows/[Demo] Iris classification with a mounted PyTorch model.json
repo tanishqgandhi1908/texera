@@ -1,521 +1,525 @@
 {
- "operators": [
-  {
-   "operatorID": "CSVFileScan-operator-Read-Iris-measurements",
-   "operatorType": "CSVFileScan",
-   "operatorVersion": "N/A",
-   "operatorProperties": {
-    "fileName": "/datasets/texera/iris-species/v1 - v1/Iris.csv",
-    "fileEncoding": "UTF_8",
-    "customDelimiter": ",",
-    "hasHeader": true
-   },
-   "inputPorts": [],
-   "outputPorts": [
+  "operators": [
     {
-     "portID": "output-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false
+      "operatorID": "CSVFileScan-operator-Read-Iris-measurements",
+      "operatorType": "CSVFileScan",
+      "operatorVersion": "N/A",
+      "operatorProperties": {
+        "fileName": "/datasets/texera/iris-species/v1 - v1/Iris.csv",
+        "fileEncoding": "UTF_8",
+        "customDelimiter": ",",
+        "hasHeader": true
+      },
+      "inputPorts": [],
+      "outputPorts": [
+        {
+          "portID": "output-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false
+        }
+      ],
+      "showAdvanced": false,
+      "isDisabled": false,
+      "customDisplayName": "Read Iris measurements",
+      "dynamicInputPorts": false,
+      "dynamicOutputPorts": false,
+      "viewResult": false
+    },
+    {
+      "operatorID": "Filter-operator-Drop-rows-with-no-petal-measurement",
+      "operatorType": "Filter",
+      "operatorVersion": "N/A",
+      "operatorProperties": {
+        "predicates": [
+          {
+            "attribute": "PetalLengthCm",
+            "condition": ">",
+            "value": "0"
+          }
+        ]
+      },
+      "inputPorts": [
+        {
+          "portID": "input-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false,
+          "dependencies": []
+        }
+      ],
+      "outputPorts": [
+        {
+          "portID": "output-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false
+        }
+      ],
+      "showAdvanced": false,
+      "isDisabled": false,
+      "customDisplayName": "Drop rows with no petal measurement",
+      "dynamicInputPorts": false,
+      "dynamicOutputPorts": false,
+      "viewResult": false
+    },
+    {
+      "operatorID": "Projection-operator-Keep-the-four-model-features",
+      "operatorType": "Projection",
+      "operatorVersion": "N/A",
+      "operatorProperties": {
+        "isDrop": false,
+        "attributes": [
+          {
+            "originalAttribute": "SepalLengthCm"
+          },
+          {
+            "originalAttribute": "SepalWidthCm"
+          },
+          {
+            "originalAttribute": "PetalLengthCm"
+          },
+          {
+            "originalAttribute": "PetalWidthCm"
+          },
+          {
+            "originalAttribute": "Species"
+          }
+        ]
+      },
+      "inputPorts": [
+        {
+          "portID": "input-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false,
+          "dependencies": []
+        }
+      ],
+      "outputPorts": [
+        {
+          "portID": "output-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false
+        }
+      ],
+      "showAdvanced": false,
+      "isDisabled": false,
+      "customDisplayName": "Keep the four model features",
+      "dynamicInputPorts": false,
+      "dynamicOutputPorts": false,
+      "viewResult": false
+    },
+    {
+      "operatorID": "PythonUDFV2-operator-Classify-with-mounted-PyTorch-model",
+      "operatorType": "PythonUDFV2",
+      "operatorVersion": "N/A",
+      "operatorProperties": {
+        "code": "from pytexera import *\n\nimport os\nimport torch\n\nFEATURES = [\"SepalLengthCm\", \"SepalWidthCm\", \"PetalLengthCm\", \"PetalWidthCm\"]\n\n\nclass ProcessBatchOperator(UDFBatchOperator):\n    \"\"\"Scores Iris rows with a PyTorch model read from a mounted model version.\n\n    IRIS_MODEL is injected by Texera from the \"Mounted model variables\" property: it\n    holds the local path of the model version mounted on this computing unit. The\n    mount is a read-only GeeseFS FUSE view of the LakeFS commit, so the ~1GB\n    checkpoint is streamed on demand rather than downloaded into the pod first.\n    \"\"\"\n\n    BATCH_SIZE = 32\n\n    @overrides\n    def open(self):\n        # Chosen in the property panel; the value is the directory this model\n        # version is mounted at inside the computing unit.\n        IRIS_MODEL = self.UiParameter(\"IRIS_MODEL\", UiParameterType.MODELS).value\n        checkpoint = torch.load(\n            os.path.join(IRIS_MODEL, \"iris_embedding_classifier.pt\"),\n            map_location=\"cpu\",\n            weights_only=True,\n        )\n        state, meta = checkpoint[\"state_dict\"], checkpoint[\"meta\"]\n        self.classes = meta[\"classes\"]\n        self.mean, self.std = state[\"norm.mean\"], state[\"norm.std\"]\n        # 1,000,000 x 256 float32: nearly all of the checkpoint's size, and the reason\n        # this model is expensive to store but not to run.\n        self.embedding = state[\"embedding.weight\"]\n        self.weights = [state[f\"head.net.{i}.weight\"] for i in (0, 2, 4)]\n        self.biases = [state[f\"head.net.{i}.bias\"] for i in (0, 2, 4)]\n\n    @overrides\n    def process_batch(self, batch: Batch, port: int) -> Iterator[Optional[BatchLike]]:\n        x = torch.from_numpy(batch[FEATURES].to_numpy(dtype=\"float32\"))\n\n        # Trained 4 -> 64 -> 32 -> 3 classifier head; this is what decides the label.\n        h = (x - self.mean) / self.std\n        for weight, bias in zip(self.weights[:-1], self.biases[:-1]):\n            h = torch.relu(h @ weight.T + bias)\n        probabilities = torch.softmax(h @ self.weights[-1].T + self.biases[-1], dim=1)\n        confidence, predicted = probabilities.max(dim=1)\n\n        # One gather per row out of the 1M-row bank: random access into a mounted\n        # tensor costs a page fetch, not a scan of the file.\n        keys = (x * 10).long().sum(dim=1).abs() % self.embedding.shape[0]\n        signature = self.embedding[keys].norm(dim=1)\n\n        batch[\"predicted_species\"] = [self.classes[i] for i in predicted.tolist()]\n        batch[\"confidence\"] = [round(c, 4) for c in confidence.tolist()]\n        batch[\"embedding_signature\"] = [round(v, 4) for v in signature.tolist()]\n        yield batch\n",
+        "workers": 1,
+        "retainInputColumns": true,
+        "defaultEnv": true,
+        "envName": "",
+        "outputColumns": [
+          {
+            "attributeName": "predicted_species",
+            "attributeType": "string"
+          },
+          {
+            "attributeName": "confidence",
+            "attributeType": "double"
+          },
+          {
+            "attributeName": "embedding_signature",
+            "attributeType": "double"
+          }
+        ],
+        "uiParameters": [
+          {
+            "attribute": {
+              "attributeName": "IRIS_MODEL",
+              "attributeType": "string"
+            },
+            "inputType": "models",
+            "value": "/models/texera/iris-embedding-classifier/v1 - v1"
+          }
+        ]
+      },
+      "inputPorts": [
+        {
+          "portID": "input-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false,
+          "dependencies": []
+        }
+      ],
+      "outputPorts": [
+        {
+          "portID": "output-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false
+        }
+      ],
+      "showAdvanced": false,
+      "isDisabled": false,
+      "customDisplayName": "Classify with mounted PyTorch model",
+      "dynamicInputPorts": false,
+      "dynamicOutputPorts": false,
+      "viewResult": true
+    },
+    {
+      "operatorID": "Scatterplot-operator-Petal-shape-by-predicted-species",
+      "operatorType": "Scatterplot",
+      "operatorVersion": "N/A",
+      "operatorProperties": {
+        "xColumn": "PetalLengthCm",
+        "yColumn": "PetalWidthCm",
+        "colorColumn": "predicted_species",
+        "alpha": 1.0,
+        "xLogScale": false,
+        "yLogScale": false
+      },
+      "inputPorts": [
+        {
+          "portID": "input-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false,
+          "dependencies": []
+        }
+      ],
+      "outputPorts": [],
+      "showAdvanced": false,
+      "isDisabled": false,
+      "customDisplayName": "Petal shape by predicted species",
+      "dynamicInputPorts": false,
+      "dynamicOutputPorts": false,
+      "viewResult": true
+    },
+    {
+      "operatorID": "Limit-operator-Sample-of-scored-rows",
+      "operatorType": "Limit",
+      "operatorVersion": "N/A",
+      "operatorProperties": {
+        "limit": 20
+      },
+      "inputPorts": [
+        {
+          "portID": "input-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false,
+          "dependencies": []
+        }
+      ],
+      "outputPorts": [
+        {
+          "portID": "output-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false
+        }
+      ],
+      "showAdvanced": false,
+      "isDisabled": false,
+      "customDisplayName": "Sample of scored rows",
+      "dynamicInputPorts": false,
+      "dynamicOutputPorts": false,
+      "viewResult": true
+    },
+    {
+      "operatorID": "Filter-operator-Keep-confident-predictions",
+      "operatorType": "Filter",
+      "operatorVersion": "N/A",
+      "operatorProperties": {
+        "predicates": [
+          {
+            "attribute": "confidence",
+            "condition": ">=",
+            "value": "0.9"
+          }
+        ]
+      },
+      "inputPorts": [
+        {
+          "portID": "input-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false,
+          "dependencies": []
+        }
+      ],
+      "outputPorts": [
+        {
+          "portID": "output-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false
+        }
+      ],
+      "showAdvanced": false,
+      "isDisabled": false,
+      "customDisplayName": "Keep confident predictions",
+      "dynamicInputPorts": false,
+      "dynamicOutputPorts": false,
+      "viewResult": false
+    },
+    {
+      "operatorID": "Aggregate-operator-Count-and-average-petal-length-per-species",
+      "operatorType": "Aggregate",
+      "operatorVersion": "N/A",
+      "operatorProperties": {
+        "aggregations": [
+          {
+            "aggFunction": "count",
+            "attribute": "predicted_species",
+            "result attribute": "prediction_count"
+          },
+          {
+            "aggFunction": "average",
+            "attribute": "PetalLengthCm",
+            "result attribute": "avg_petal_length"
+          }
+        ],
+        "groupByKeys": [
+          "predicted_species"
+        ]
+      },
+      "inputPorts": [
+        {
+          "portID": "input-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false,
+          "dependencies": []
+        }
+      ],
+      "outputPorts": [
+        {
+          "portID": "output-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false
+        }
+      ],
+      "showAdvanced": false,
+      "isDisabled": false,
+      "customDisplayName": "Count and average petal length per species",
+      "dynamicInputPorts": false,
+      "dynamicOutputPorts": false,
+      "viewResult": false
+    },
+    {
+      "operatorID": "Sort-operator-Most-predicted-species-first",
+      "operatorType": "Sort",
+      "operatorVersion": "N/A",
+      "operatorProperties": {
+        "attributes": [
+          {
+            "attribute": "prediction_count",
+            "sortPreference": "DESC"
+          }
+        ]
+      },
+      "inputPorts": [
+        {
+          "portID": "input-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false,
+          "dependencies": []
+        }
+      ],
+      "outputPorts": [
+        {
+          "portID": "output-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false
+        }
+      ],
+      "showAdvanced": false,
+      "isDisabled": false,
+      "customDisplayName": "Most predicted species first",
+      "dynamicInputPorts": false,
+      "dynamicOutputPorts": false,
+      "viewResult": false
+    },
+    {
+      "operatorID": "BarChart-operator-Prediction-distribution",
+      "operatorType": "BarChart",
+      "operatorVersion": "N/A",
+      "operatorProperties": {
+        "fields": "predicted_species",
+        "value": "prediction_count",
+        "horizontalOrientation": false
+      },
+      "inputPorts": [
+        {
+          "portID": "input-0",
+          "displayName": "",
+          "allowMultiInputs": false,
+          "isDynamicPort": false,
+          "dependencies": []
+        }
+      ],
+      "outputPorts": [],
+      "showAdvanced": false,
+      "isDisabled": false,
+      "customDisplayName": "Prediction distribution",
+      "dynamicInputPorts": false,
+      "dynamicOutputPorts": false,
+      "viewResult": true
     }
-   ],
-   "showAdvanced": false,
-   "isDisabled": false,
-   "customDisplayName": "Read Iris measurements",
-   "dynamicInputPorts": false,
-   "dynamicOutputPorts": false,
-   "viewResult": false
+  ],
+  "operatorPositions": {
+    "CSVFileScan-operator-Read-Iris-measurements": {
+      "x": -420,
+      "y": 160
+    },
+    "Filter-operator-Drop-rows-with-no-petal-measurement": {
+      "x": -230,
+      "y": 160
+    },
+    "Projection-operator-Keep-the-four-model-features": {
+      "x": -40,
+      "y": 160
+    },
+    "PythonUDFV2-operator-Classify-with-mounted-PyTorch-model": {
+      "x": 170,
+      "y": 160
+    },
+    "Scatterplot-operator-Petal-shape-by-predicted-species": {
+      "x": 400,
+      "y": -20
+    },
+    "Limit-operator-Sample-of-scored-rows": {
+      "x": 400,
+      "y": 100
+    },
+    "Filter-operator-Keep-confident-predictions": {
+      "x": 400,
+      "y": 260
+    },
+    "Aggregate-operator-Count-and-average-petal-length-per-species": {
+      "x": 610,
+      "y": 260
+    },
+    "Sort-operator-Most-predicted-species-first": {
+      "x": 850,
+      "y": 260
+    },
+    "BarChart-operator-Prediction-distribution": {
+      "x": 1050,
+      "y": 260
+    }
   },
-  {
-   "operatorID": "Filter-operator-Drop-rows-with-no-petal-measurement",
-   "operatorType": "Filter",
-   "operatorVersion": "N/A",
-   "operatorProperties": {
-    "predicates": [
-     {
-      "attribute": "PetalLengthCm",
-      "condition": ">",
-      "value": "0"
-     }
-    ]
-   },
-   "inputPorts": [
+  "links": [
     {
-     "portID": "input-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false,
-     "dependencies": []
-    }
-   ],
-   "outputPorts": [
+      "linkID": "link-CSVFileScan-operator-Read-Iris-measurements--Filter-operator-Drop-rows-with-no-petal-measurement",
+      "source": {
+        "operatorID": "CSVFileScan-operator-Read-Iris-measurements",
+        "portID": "output-0"
+      },
+      "target": {
+        "operatorID": "Filter-operator-Drop-rows-with-no-petal-measurement",
+        "portID": "input-0"
+      }
+    },
     {
-     "portID": "output-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false
-    }
-   ],
-   "showAdvanced": false,
-   "isDisabled": false,
-   "customDisplayName": "Drop rows with no petal measurement",
-   "dynamicInputPorts": false,
-   "dynamicOutputPorts": false,
-   "viewResult": false
-  },
-  {
-   "operatorID": "Projection-operator-Keep-the-four-model-features",
-   "operatorType": "Projection",
-   "operatorVersion": "N/A",
-   "operatorProperties": {
-    "isDrop": false,
-    "attributes": [
-     {
-      "originalAttribute": "SepalLengthCm"
-     },
-     {
-      "originalAttribute": "SepalWidthCm"
-     },
-     {
-      "originalAttribute": "PetalLengthCm"
-     },
-     {
-      "originalAttribute": "PetalWidthCm"
-     },
-     {
-      "originalAttribute": "Species"
-     }
-    ]
-   },
-   "inputPorts": [
+      "linkID": "link-Filter-operator-Drop-rows-with-no-petal-measurement--Projection-operator-Keep-the-four-model-features",
+      "source": {
+        "operatorID": "Filter-operator-Drop-rows-with-no-petal-measurement",
+        "portID": "output-0"
+      },
+      "target": {
+        "operatorID": "Projection-operator-Keep-the-four-model-features",
+        "portID": "input-0"
+      }
+    },
     {
-     "portID": "input-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false,
-     "dependencies": []
-    }
-   ],
-   "outputPorts": [
+      "linkID": "link-Projection-operator-Keep-the-four-model-features--PythonUDFV2-operator-Classify-with-mounted-PyTorch-model",
+      "source": {
+        "operatorID": "Projection-operator-Keep-the-four-model-features",
+        "portID": "output-0"
+      },
+      "target": {
+        "operatorID": "PythonUDFV2-operator-Classify-with-mounted-PyTorch-model",
+        "portID": "input-0"
+      }
+    },
     {
-     "portID": "output-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false
-    }
-   ],
-   "showAdvanced": false,
-   "isDisabled": false,
-   "customDisplayName": "Keep the four model features",
-   "dynamicInputPorts": false,
-   "dynamicOutputPorts": false,
-   "viewResult": false
-  },
-  {
-   "operatorID": "PythonUDFV2-operator-Classify-with-mounted-PyTorch-model",
-   "operatorType": "PythonUDFV2",
-   "operatorVersion": "N/A",
-   "operatorProperties": {
-    "code": "from pytexera import *\n\nimport os\nimport torch\n\nFEATURES = [\"SepalLengthCm\", \"SepalWidthCm\", \"PetalLengthCm\", \"PetalWidthCm\"]\n\n\nclass ProcessBatchOperator(UDFBatchOperator):\n    \"\"\"Scores Iris rows with a PyTorch model read from a mounted model version.\n\n    IRIS_MODEL is injected by Texera from the \"Mounted model variables\" property: it\n    holds the local path of the model version mounted on this computing unit. The\n    mount is a read-only GeeseFS FUSE view of the LakeFS commit, so the ~1GB\n    checkpoint is streamed on demand rather than downloaded into the pod first.\n    \"\"\"\n\n    BATCH_SIZE = 32\n\n    @overrides\n    def open(self):\n        checkpoint = torch.load(\n            os.path.join(IRIS_MODEL, \"iris_embedding_classifier.pt\"),\n            map_location=\"cpu\",\n            weights_only=True,\n        )\n        state, meta = checkpoint[\"state_dict\"], checkpoint[\"meta\"]\n        self.classes = meta[\"classes\"]\n        self.mean, self.std = state[\"norm.mean\"], state[\"norm.std\"]\n        # 1,000,000 x 256 float32: nearly all of the checkpoint's size, and the reason\n        # this model is expensive to store but not to run.\n        self.embedding = state[\"embedding.weight\"]\n        self.weights = [state[f\"head.net.{i}.weight\"] for i in (0, 2, 4)]\n        self.biases = [state[f\"head.net.{i}.bias\"] for i in (0, 2, 4)]\n\n    @overrides\n    def process_batch(self, batch: Batch, port: int) -> Iterator[Optional[BatchLike]]:\n        x = torch.from_numpy(batch[FEATURES].to_numpy(dtype=\"float32\"))\n\n        # Trained 4 -> 64 -> 32 -> 3 classifier head; this is what decides the label.\n        h = (x - self.mean) / self.std\n        for weight, bias in zip(self.weights[:-1], self.biases[:-1]):\n            h = torch.relu(h @ weight.T + bias)\n        probabilities = torch.softmax(h @ self.weights[-1].T + self.biases[-1], dim=1)\n        confidence, predicted = probabilities.max(dim=1)\n\n        # One gather per row out of the 1M-row bank: random access into a mounted\n        # tensor costs a page fetch, not a scan of the file.\n        keys = (x * 10).long().sum(dim=1).abs() % self.embedding.shape[0]\n        signature = self.embedding[keys].norm(dim=1)\n\n        batch[\"predicted_species\"] = [self.classes[i] for i in predicted.tolist()]\n        batch[\"confidence\"] = [round(c, 4) for c in confidence.tolist()]\n        batch[\"embedding_signature\"] = [round(v, 4) for v in signature.tolist()]\n        yield batch\n",
-    "workers": 1,
-    "retainInputColumns": true,
-    "defaultEnv": true,
-    "envName": "",
-    "outputColumns": [
-     {
-      "attributeName": "predicted_species",
-      "attributeType": "string"
-     },
-     {
-      "attributeName": "confidence",
-      "attributeType": "double"
-     },
-     {
-      "attributeName": "embedding_signature",
-      "attributeType": "double"
-     }
-    ],
-    "modelVariables": [
-     {
-      "variableName": "IRIS_MODEL",
-      "modelPath": "/models/texera/iris-embedding-classifier/v1 - v1"
-     }
-    ]
-   },
-   "inputPorts": [
+      "linkID": "link-PythonUDFV2-operator-Classify-with-mounted-PyTorch-model--Scatterplot-operator-Petal-shape-by-predicted-species",
+      "source": {
+        "operatorID": "PythonUDFV2-operator-Classify-with-mounted-PyTorch-model",
+        "portID": "output-0"
+      },
+      "target": {
+        "operatorID": "Scatterplot-operator-Petal-shape-by-predicted-species",
+        "portID": "input-0"
+      }
+    },
     {
-     "portID": "input-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false,
-     "dependencies": []
-    }
-   ],
-   "outputPorts": [
+      "linkID": "link-PythonUDFV2-operator-Classify-with-mounted-PyTorch-model--Limit-operator-Sample-of-scored-rows",
+      "source": {
+        "operatorID": "PythonUDFV2-operator-Classify-with-mounted-PyTorch-model",
+        "portID": "output-0"
+      },
+      "target": {
+        "operatorID": "Limit-operator-Sample-of-scored-rows",
+        "portID": "input-0"
+      }
+    },
     {
-     "portID": "output-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false
-    }
-   ],
-   "showAdvanced": false,
-   "isDisabled": false,
-   "customDisplayName": "Classify with mounted PyTorch model",
-   "dynamicInputPorts": false,
-   "dynamicOutputPorts": false,
-   "viewResult": true
-  },
-  {
-   "operatorID": "Scatterplot-operator-Petal-shape-by-predicted-species",
-   "operatorType": "Scatterplot",
-   "operatorVersion": "N/A",
-   "operatorProperties": {
-    "xColumn": "PetalLengthCm",
-    "yColumn": "PetalWidthCm",
-    "colorColumn": "predicted_species",
-    "alpha": 1.0,
-    "xLogScale": false,
-    "yLogScale": false
-   },
-   "inputPorts": [
+      "linkID": "link-PythonUDFV2-operator-Classify-with-mounted-PyTorch-model--Filter-operator-Keep-confident-predictions",
+      "source": {
+        "operatorID": "PythonUDFV2-operator-Classify-with-mounted-PyTorch-model",
+        "portID": "output-0"
+      },
+      "target": {
+        "operatorID": "Filter-operator-Keep-confident-predictions",
+        "portID": "input-0"
+      }
+    },
     {
-     "portID": "input-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false,
-     "dependencies": []
-    }
-   ],
-   "outputPorts": [],
-   "showAdvanced": false,
-   "isDisabled": false,
-   "customDisplayName": "Petal shape by predicted species",
-   "dynamicInputPorts": false,
-   "dynamicOutputPorts": false,
-   "viewResult": true
-  },
-  {
-   "operatorID": "Limit-operator-Sample-of-scored-rows",
-   "operatorType": "Limit",
-   "operatorVersion": "N/A",
-   "operatorProperties": {
-    "limit": 20
-   },
-   "inputPorts": [
+      "linkID": "link-Filter-operator-Keep-confident-predictions--Aggregate-operator-Count-and-average-petal-length-per-species",
+      "source": {
+        "operatorID": "Filter-operator-Keep-confident-predictions",
+        "portID": "output-0"
+      },
+      "target": {
+        "operatorID": "Aggregate-operator-Count-and-average-petal-length-per-species",
+        "portID": "input-0"
+      }
+    },
     {
-     "portID": "input-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false,
-     "dependencies": []
-    }
-   ],
-   "outputPorts": [
+      "linkID": "link-Aggregate-operator-Count-and-average-petal-length-per-species--Sort-operator-Most-predicted-species-first",
+      "source": {
+        "operatorID": "Aggregate-operator-Count-and-average-petal-length-per-species",
+        "portID": "output-0"
+      },
+      "target": {
+        "operatorID": "Sort-operator-Most-predicted-species-first",
+        "portID": "input-0"
+      }
+    },
     {
-     "portID": "output-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false
+      "linkID": "link-Sort-operator-Most-predicted-species-first--BarChart-operator-Prediction-distribution",
+      "source": {
+        "operatorID": "Sort-operator-Most-predicted-species-first",
+        "portID": "output-0"
+      },
+      "target": {
+        "operatorID": "BarChart-operator-Prediction-distribution",
+        "portID": "input-0"
+      }
     }
-   ],
-   "showAdvanced": false,
-   "isDisabled": false,
-   "customDisplayName": "Sample of scored rows",
-   "dynamicInputPorts": false,
-   "dynamicOutputPorts": false,
-   "viewResult": true
-  },
-  {
-   "operatorID": "Filter-operator-Keep-confident-predictions",
-   "operatorType": "Filter",
-   "operatorVersion": "N/A",
-   "operatorProperties": {
-    "predicates": [
-     {
-      "attribute": "confidence",
-      "condition": ">=",
-      "value": "0.9"
-     }
-    ]
-   },
-   "inputPorts": [
-    {
-     "portID": "input-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false,
-     "dependencies": []
-    }
-   ],
-   "outputPorts": [
-    {
-     "portID": "output-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false
-    }
-   ],
-   "showAdvanced": false,
-   "isDisabled": false,
-   "customDisplayName": "Keep confident predictions",
-   "dynamicInputPorts": false,
-   "dynamicOutputPorts": false,
-   "viewResult": false
-  },
-  {
-   "operatorID": "Aggregate-operator-Count-and-average-petal-length-per-species",
-   "operatorType": "Aggregate",
-   "operatorVersion": "N/A",
-   "operatorProperties": {
-    "aggregations": [
-     {
-      "aggFunction": "count",
-      "attribute": "predicted_species",
-      "result attribute": "prediction_count"
-     },
-     {
-      "aggFunction": "average",
-      "attribute": "PetalLengthCm",
-      "result attribute": "avg_petal_length"
-     }
-    ],
-    "groupByKeys": [
-     "predicted_species"
-    ]
-   },
-   "inputPorts": [
-    {
-     "portID": "input-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false,
-     "dependencies": []
-    }
-   ],
-   "outputPorts": [
-    {
-     "portID": "output-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false
-    }
-   ],
-   "showAdvanced": false,
-   "isDisabled": false,
-   "customDisplayName": "Count and average petal length per species",
-   "dynamicInputPorts": false,
-   "dynamicOutputPorts": false,
-   "viewResult": false
-  },
-  {
-   "operatorID": "Sort-operator-Most-predicted-species-first",
-   "operatorType": "Sort",
-   "operatorVersion": "N/A",
-   "operatorProperties": {
-    "attributes": [
-     {
-      "attribute": "prediction_count",
-      "sortPreference": "DESC"
-     }
-    ]
-   },
-   "inputPorts": [
-    {
-     "portID": "input-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false,
-     "dependencies": []
-    }
-   ],
-   "outputPorts": [
-    {
-     "portID": "output-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false
-    }
-   ],
-   "showAdvanced": false,
-   "isDisabled": false,
-   "customDisplayName": "Most predicted species first",
-   "dynamicInputPorts": false,
-   "dynamicOutputPorts": false,
-   "viewResult": false
-  },
-  {
-   "operatorID": "BarChart-operator-Prediction-distribution",
-   "operatorType": "BarChart",
-   "operatorVersion": "N/A",
-   "operatorProperties": {
-    "fields": "predicted_species",
-    "value": "prediction_count",
-    "horizontalOrientation": false
-   },
-   "inputPorts": [
-    {
-     "portID": "input-0",
-     "displayName": "",
-     "allowMultiInputs": false,
-     "isDynamicPort": false,
-     "dependencies": []
-    }
-   ],
-   "outputPorts": [],
-   "showAdvanced": false,
-   "isDisabled": false,
-   "customDisplayName": "Prediction distribution",
-   "dynamicInputPorts": false,
-   "dynamicOutputPorts": false,
-   "viewResult": true
+  ],
+  "commentBoxes": [],
+  "settings": {
+    "dataTransferBatchSize": 400
   }
- ],
- "operatorPositions": {
-  "CSVFileScan-operator-Read-Iris-measurements": {
-   "x": -420,
-   "y": 160
-  },
-  "Filter-operator-Drop-rows-with-no-petal-measurement": {
-   "x": -230,
-   "y": 160
-  },
-  "Projection-operator-Keep-the-four-model-features": {
-   "x": -40,
-   "y": 160
-  },
-  "PythonUDFV2-operator-Classify-with-mounted-PyTorch-model": {
-   "x": 170,
-   "y": 160
-  },
-  "Scatterplot-operator-Petal-shape-by-predicted-species": {
-   "x": 400,
-   "y": -20
-  },
-  "Limit-operator-Sample-of-scored-rows": {
-   "x": 400,
-   "y": 100
-  },
-  "Filter-operator-Keep-confident-predictions": {
-   "x": 400,
-   "y": 260
-  },
-  "Aggregate-operator-Count-and-average-petal-length-per-species": {
-   "x": 610,
-   "y": 260
-  },
-  "Sort-operator-Most-predicted-species-first": {
-   "x": 850,
-   "y": 260
-  },
-  "BarChart-operator-Prediction-distribution": {
-   "x": 1050,
-   "y": 260
-  }
- },
- "links": [
-  {
-   "linkID": "link-CSVFileScan-operator-Read-Iris-measurements--Filter-operator-Drop-rows-with-no-petal-measurement",
-   "source": {
-    "operatorID": "CSVFileScan-operator-Read-Iris-measurements",
-    "portID": "output-0"
-   },
-   "target": {
-    "operatorID": "Filter-operator-Drop-rows-with-no-petal-measurement",
-    "portID": "input-0"
-   }
-  },
-  {
-   "linkID": "link-Filter-operator-Drop-rows-with-no-petal-measurement--Projection-operator-Keep-the-four-model-features",
-   "source": {
-    "operatorID": "Filter-operator-Drop-rows-with-no-petal-measurement",
-    "portID": "output-0"
-   },
-   "target": {
-    "operatorID": "Projection-operator-Keep-the-four-model-features",
-    "portID": "input-0"
-   }
-  },
-  {
-   "linkID": "link-Projection-operator-Keep-the-four-model-features--PythonUDFV2-operator-Classify-with-mounted-PyTorch-model",
-   "source": {
-    "operatorID": "Projection-operator-Keep-the-four-model-features",
-    "portID": "output-0"
-   },
-   "target": {
-    "operatorID": "PythonUDFV2-operator-Classify-with-mounted-PyTorch-model",
-    "portID": "input-0"
-   }
-  },
-  {
-   "linkID": "link-PythonUDFV2-operator-Classify-with-mounted-PyTorch-model--Scatterplot-operator-Petal-shape-by-predicted-species",
-   "source": {
-    "operatorID": "PythonUDFV2-operator-Classify-with-mounted-PyTorch-model",
-    "portID": "output-0"
-   },
-   "target": {
-    "operatorID": "Scatterplot-operator-Petal-shape-by-predicted-species",
-    "portID": "input-0"
-   }
-  },
-  {
-   "linkID": "link-PythonUDFV2-operator-Classify-with-mounted-PyTorch-model--Limit-operator-Sample-of-scored-rows",
-   "source": {
-    "operatorID": "PythonUDFV2-operator-Classify-with-mounted-PyTorch-model",
-    "portID": "output-0"
-   },
-   "target": {
-    "operatorID": "Limit-operator-Sample-of-scored-rows",
-    "portID": "input-0"
-   }
-  },
-  {
-   "linkID": "link-PythonUDFV2-operator-Classify-with-mounted-PyTorch-model--Filter-operator-Keep-confident-predictions",
-   "source": {
-    "operatorID": "PythonUDFV2-operator-Classify-with-mounted-PyTorch-model",
-    "portID": "output-0"
-   },
-   "target": {
-    "operatorID": "Filter-operator-Keep-confident-predictions",
-    "portID": "input-0"
-   }
-  },
-  {
-   "linkID": "link-Filter-operator-Keep-confident-predictions--Aggregate-operator-Count-and-average-petal-length-per-species",
-   "source": {
-    "operatorID": "Filter-operator-Keep-confident-predictions",
-    "portID": "output-0"
-   },
-   "target": {
-    "operatorID": "Aggregate-operator-Count-and-average-petal-length-per-species",
-    "portID": "input-0"
-   }
-  },
-  {
-   "linkID": "link-Aggregate-operator-Count-and-average-petal-length-per-species--Sort-operator-Most-predicted-species-first",
-   "source": {
-    "operatorID": "Aggregate-operator-Count-and-average-petal-length-per-species",
-    "portID": "output-0"
-   },
-   "target": {
-    "operatorID": "Sort-operator-Most-predicted-species-first",
-    "portID": "input-0"
-   }
-  },
-  {
-   "linkID": "link-Sort-operator-Most-predicted-species-first--BarChart-operator-Prediction-distribution",
-   "source": {
-    "operatorID": "Sort-operator-Most-predicted-species-first",
-    "portID": "output-0"
-   },
-   "target": {
-    "operatorID": "BarChart-operator-Prediction-distribution",
-    "portID": "input-0"
-   }
-  }
- ],
- "commentBoxes": [],
- "settings": {
-  "dataTransferBatchSize": 400
- }
 }
