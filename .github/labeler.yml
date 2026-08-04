@@ -50,10 +50,15 @@ platform:
           - 'notebook-migration-service/**'
           - 'workflow-compiling-service/**'
 
+# The Bun/TypeScript stack: agent-service, mcp-service, and the texera-sdk
+# package both consume. They are built and tested in one CI job, so a change
+# to any of them must select it.
 agent-service:
   - changed-files:
       - any-glob-to-any-file:
           - 'agent-service/**'
+          - 'mcp-service/**'
+          - 'packages/texera-sdk/**'
 
 engine:
   # Non-Python, non-integration parts of amber/. Pure Python changes
