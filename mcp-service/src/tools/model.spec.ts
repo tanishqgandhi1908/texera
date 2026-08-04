@@ -122,7 +122,7 @@ describe("model tools", () => {
     expect(error).toContain("model_upload_local_file");
   });
 
-  it("commits a version and reports the locator to mount", async () => {
+  it("commits a version and points at binding it, not at mounting it", async () => {
     const deployment = deploymentWithModel().post("/api/model/:mid/version/create", () =>
       json({ modelVersion: modelVersionResponse(), fileNodes: [] })
     );
@@ -130,7 +130,8 @@ describe("model tools", () => {
 
     const output = await harness.call("model_create_version", { mid: 5, version_name: "trained" });
     expect(output).toContain("Mount locator: model-5:5226497070d1");
-    expect(output).toContain("computing_unit_mount_model");
+    expect(output).toContain("modelVariables");
+    expect(output).not.toContain("computing_unit_mount_model");
     // The endpoint takes a bare string body, not JSON.
     expect(deployment.recorded("POST", "/api/model/5/version/create")[0].body).toEqual("trained");
   });
@@ -270,74 +271,17 @@ describe("model tools", () => {
   });
 });
 
-describe("mount tools", () => {
+describe("computing_unit_list_mounts", () => {
   function deploymentWithUnit(): FakeTexera {
     return deploymentWithModel()
-      .get("/api/computing-unit", () => json([computingUnit()]))
-      .get("/api/computing-unit/:cuid/mounts", () => json([]))
-      .post("/api/computing-unit/:cuid/mounts", () => json(mountedModelResponse()))
-      .delete("/api/computing-unit/:cuid/mounts", () => text("", 200));
+      .get("/api/computing-unit", () => json([computingUnitResponse()]))
+      .get("/api/computing-unit/:cuid/mounts", () => json([]));
   }
 
-  function computingUnit(overrides: Partial<{ type: string; status: string }> = {}) {
-    return {
-      computingUnit: {
-        cuid: 1,
-        uid: 7,
-        name: "model-demo",
-        creationTime: 1_700_000_000_000,
-        terminateTime: null,
-        type: overrides.type ?? "kubernetes",
-      },
-      status: overrides.status ?? "Running",
-      metrics: { cpuUsage: "0.1", memoryUsage: "512Mi" },
-      isOwner: true,
-      accessPrivilege: "WRITE",
-    };
-  }
-
-  it("mounts the newest version when given only a model id", async () => {
-    const deployment = deploymentWithUnit();
-    harness = await startHarness(deployment);
-
-    const output = await harness.call("computing_unit_mount_model", { cuid: 1, mid: 5 });
-    expect(output).toContain("Mounted /models/alice@example.org/iris-classifier/v1");
-    expect(output).toContain("modelVariables");
-
-    const sent = JSON.parse(deployment.recorded("POST", "/api/computing-unit/1/mounts")[0].body!);
-    expect(sent).toEqual({ modelPath: "/models/alice@example.org/iris-classifier/v1" });
-  });
-
-  it("refuses a local computing unit, explaining why mounting needs a node", async () => {
-    const deployment = deploymentWithUnit().get("/api/computing-unit", () => json([computingUnit({ type: "local" })]));
-    harness = await startHarness(deployment);
-
-    const error = await harness.callExpectingError("computing_unit_mount_model", { cuid: 1, mid: 5 });
-    expect(error).toContain("Kubernetes unit");
-  });
-
-  it("refuses a unit that is not Running yet", async () => {
-    const deployment = deploymentWithUnit().get("/api/computing-unit", () =>
-      json([computingUnit({ status: "Pending" })])
-    );
-    harness = await startHarness(deployment);
-
-    const error = await harness.callExpectingError("computing_unit_mount_model", { cuid: 1, mid: 5 });
-    expect(error).toContain("Pending");
-  });
-
-  it("refuses to mount a model with no committed version", async () => {
-    const deployment = deploymentWithUnit().get("/api/model/:mid/version/list", () => json([]));
-    harness = await startHarness(deployment);
-
-    const error = await harness.callExpectingError("computing_unit_mount_model", { cuid: 1, mid: 5 });
-    expect(error).toContain("no committed versions");
-  });
-
-  it("says what to do next when nothing is mounted", async () => {
+  it("treats an empty list before a run as expected, not as a problem", async () => {
     harness = await startHarness(deploymentWithUnit());
     const output = await harness.call("computing_unit_list_mounts", { cuid: 1 });
-    expect(output).toContain("computing_unit_mount_model");
+    expect(output).toContain("That is expected before a run");
   });
 
   it("lists mounts with the path they appear at inside the pod", async () => {
@@ -351,69 +295,25 @@ describe("mount tools", () => {
     expect(output).toContain("/models/alice@example.org/iris-classifier/v1");
   });
 
-  it("unmounts by explicit model path", async () => {
-    const deployment = deploymentWithUnit();
-    harness = await startHarness(deployment);
-
-    const output = await harness.call("computing_unit_unmount_model", {
-      cuid: 1,
-      model_path: "/models/alice@example.org/iris-classifier/v1",
-    });
-    expect(output).toContain("Unmounted");
-    const sent = JSON.parse(deployment.recorded("DELETE", "/api/computing-unit/1/mounts")[0].body!);
-    expect(sent).toEqual({ modelPath: "/models/alice@example.org/iris-classifier/v1" });
+  it("no longer exposes tools that mount or unmount", async () => {
+    // The engine mounts what a UDF names when the worker starts, so a caller
+    // that mounts by hand is doing work that cannot be needed and can go stale.
+    harness = await startHarness(deploymentWithUnit());
+    const names = (await harness.client.listTools()).tools.map(tool => tool.name);
+    expect(names).not.toContain("computing_unit_mount_model");
+    expect(names).not.toContain("computing_unit_unmount_model");
   });
 });
 
-describe("workflow_run mount precondition", () => {
-  it("refuses to run a UDF whose model is not mounted, and names the fix", async () => {
-    const deployment = new FakeTexera()
-      .get("/api/resources/operator-metadata", () => json(OPERATOR_METADATA))
-      .get("/api/workflow/:wid", () =>
-        json(
-          workflowResponse({
-            wid: 4,
-            content: {
-              operators: [
-                {
-                  operatorID: "PythonUDFV2-operator-1",
-                  operatorType: "PythonUDFV2",
-                  operatorVersion: "1",
-                  operatorProperties: {
-                    code: "pass",
-                    workers: 1,
-                    modelVariables: [{ variableName: "IRIS_MODEL", modelPath: "/models/alice@example.org/iris/v1" }],
-                  },
-                  inputPorts: [],
-                  outputPorts: [{ portID: "output-0", displayName: "" }],
-                  showAdvanced: false,
-                  isDisabled: false,
-                },
-              ],
-              links: [],
-              operatorPositions: { "PythonUDFV2-operator-1": { x: 0, y: 0 } },
-              commentBoxes: [],
-              settings: { dataTransferBatchSize: 400 },
-            } as never,
-          })
-        )
-      )
-      .get("/api/computing-unit", () => json([computingUnitResponse()]))
-      .get("/api/computing-unit/:cuid/mounts", () => json([]));
-    harness = await startHarness(deployment);
-
-    await harness.call("workflow_open", { wid: 4 });
-    const error = await harness.callExpectingError("workflow_run", {});
-    expect(error).toContain("IRIS_MODEL");
-    expect(error).toContain('computing_unit_mount_model(cuid: 1, model_path: "/models/alice@example.org/iris/v1")');
-  });
-
-  it("runs when the model is mounted", async () => {
+describe("workflow_run with model variables", () => {
+  it("runs a UDF that binds a model without requiring it to be mounted first", async () => {
+    // The engine mounts on worker startup; refusing here would block a run that
+    // would have succeeded.
     const deployment = new FakeTexera()
       .get("/api/resources/operator-metadata", () => json(OPERATOR_METADATA))
       .get("/api/workflow/:wid", () => json(workflowResponse({ wid: 4, content: twoOperatorContent() })))
       .get("/api/computing-unit", () => json([computingUnitResponse()]))
-      .get("/api/computing-unit/:cuid/mounts", () => json([mountedModelResponse()]))
+      .get("/api/computing-unit/:cuid/mounts", () => json([]))
       .post("/api/execution/:wid/:cuid/run", () =>
         json({ status: "COMPLETED", operatorResults: {}, operatorStats: {}, compilationErrors: {}, runtimeErrors: [] })
       );

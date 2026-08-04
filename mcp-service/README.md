@@ -117,13 +117,13 @@ in-memory graph, so you can test before committing to a save.
 workflow_open → add/modify/delete → workflow_validate → workflow_run → workflow_save
 ```
 
-**A model must be mounted before a UDF can read it.** A mount exposes one committed version inside one
-computing unit as a read-only filesystem; a Python UDF binds a variable to it through the operator's
-`modelVariables` property. Without the mount the variable points at nothing, and the UDF fails on a
-missing path minutes into a run — so `workflow_run` checks first and refuses.
+**A model is reached by binding it, not by mounting it.** A Python UDF names a committed version in its
+`modelVariables` property, and the engine mounts that version into the computing unit when the worker
+starts — as a read-only filesystem, so a multi-gigabyte checkpoint costs a few hundred milliseconds and
+only the bytes the UDF reads ever move. There is no mount step to perform or to forget.
 
 ```
-model_create_version → computing_unit_mount_model → workflow_add_operator(… modelVariables …) → workflow_run
+model_create_version → workflow_add_operator(… modelVariables …) → workflow_run
 ```
 
 ---
@@ -153,7 +153,8 @@ model_create_version → computing_unit_mount_model → workflow_add_operator(�
 
 Trained weights, versioned like datasets and **mounted** rather than copied — a computing unit exposes
 a model version as a read-only filesystem, so a UDF can `torch.load` a multi-gigabyte checkpoint without
-the pod ever downloading it.
+the pod ever downloading it. Mounting happens on its own: a UDF names the version it wants and the
+worker mounts it at startup.
 
 | Tool | What it does |
 | --- | --- |
@@ -163,7 +164,7 @@ the pod ever downloading it.
 | `model_upload_text_file` / `model_delete_file` | Stage a small text file, or a deletion. |
 | `model_create_version` | Commit staged files into a mountable version. |
 | `model_list_files` / `model_uncommitted_changes` | What is in a version, and what is staged. |
-| `computing_unit_list_mounts` / `computing_unit_mount_model` / `computing_unit_unmount_model` | Manage a unit's mounts. |
+| `computing_unit_list_mounts` | What a unit has mounted. Diagnostic — mounting itself is automatic. |
 
 ### Workflows
 

@@ -37,7 +37,7 @@ class PythonUDFOpDescV2 extends LogicalOp {
     required = true,
     defaultValue =
       "# Models mounted on this computing unit and bound to variables in the\n" +
-        "# \"Mounted model variables\" property are available as local paths. For\n" +
+        "# \"Model variables\" property are available as local paths. For\n" +
         "# example, if you bind a model to the variable M:\n" +
         "#     torch.load(f\"{M}/model.pt\")\n" +
         "# \n" +
@@ -98,10 +98,10 @@ class PythonUDFOpDescV2 extends LogicalOp {
   var outputColumns: List[Attribute] = List()
 
   @JsonProperty()
-  @JsonSchemaTitle("Mounted model variables")
+  @JsonSchemaTitle("Model variables")
   @JsonPropertyDescription(
-    "Bind models mounted on this computing unit to variables. In your code, each " +
-      "variable holds the local filesystem path to that model."
+    "Bind model versions to variables. In your code, each variable holds the local " +
+      "filesystem path to that model; it is mounted into the computing unit when the workflow runs."
   )
   var modelVariables: List[ModelVariableMapping] = List()
 

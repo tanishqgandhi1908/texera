@@ -204,36 +204,16 @@ export class WorkflowComputingUnitManagingService {
 
   /**
    * List the models currently mounted on a computing unit.
+   *
+   * Read-only: nothing in the UI mounts on the user's behalf any more. A Python UDF
+   * names the model versions it needs and the engine mounts them when the worker
+   * starts, so this exists to show what a unit ended up with, not to manage it.
+   *
    * @param cuid The ID of the computing unit.
    */
   public listMountedModels(cuid: number): Observable<MountedModelInfo[]> {
     return this.http.get<MountedModelInfo[]>(
       `${AppSettings.getApiEndpoint()}/${COMPUTING_UNIT_BASE_URL}/${cuid}/mounts`
-    );
-  }
-
-  /**
-   * Mount a model version onto a computing unit.
-   * @param cuid The ID of the computing unit.
-   * @param modelPath The /models/ownerEmail/modelName/versionName path to mount.
-   */
-  public mountModel(cuid: number, modelPath: string): Observable<MountedModelInfo> {
-    return this.http.post<MountedModelInfo>(
-      `${AppSettings.getApiEndpoint()}/${COMPUTING_UNIT_BASE_URL}/${cuid}/mounts`,
-      { modelPath }
-    );
-  }
-
-  /**
-   * Unmount a model version from a computing unit.
-   * @param cuid The ID of the computing unit.
-   * @param modelPath The /models/ownerEmail/modelName/versionName path to unmount.
-   */
-  public unmountModel(cuid: number, modelPath: string): Observable<Response> {
-    return this.http.request<Response>(
-      "delete",
-      `${AppSettings.getApiEndpoint()}/${COMPUTING_UNIT_BASE_URL}/${cuid}/mounts`,
-      { body: { modelPath } }
     );
   }
 }

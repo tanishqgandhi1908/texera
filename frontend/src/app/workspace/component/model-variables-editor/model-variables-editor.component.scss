@@ -47,6 +47,18 @@
 .model-variable-select {
   flex: 1;
   min-width: 0;
+  // The button carries a path that can be long; keep it on one line and let the
+  // tooltip show the whole thing rather than letting the row grow.
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+}
+
+.model-variable-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .model-variable-remove {

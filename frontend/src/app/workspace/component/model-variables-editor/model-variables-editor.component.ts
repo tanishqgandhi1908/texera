@@ -22,18 +22,14 @@ import { FieldType, FieldTypeConfig } from "@ngx-formly/core";
 import { UntilDestroy, untilDestroyed } from "@ngneat/until-destroy";
 import { NgFor, NgIf } from "@angular/common";
 import { FormsModule } from "@angular/forms";
+import { NzModalService } from "ng-zorro-antd/modal";
 import { NzButtonComponent } from "ng-zorro-antd/button";
 import { NzWaveDirective } from "ng-zorro-antd/core/wave";
 import { ɵNzTransitionPatchDirective } from "ng-zorro-antd/core/transition-patch";
 import { NzInputDirective } from "ng-zorro-antd/input";
 import { NzIconDirective } from "ng-zorro-antd/icon";
-import { NzSelectComponent, NzOptionComponent } from "ng-zorro-antd/select";
 import { NzTooltipDirective } from "ng-zorro-antd/tooltip";
-import { ComputingUnitStatusService } from "../../../common/service/computing-unit/computing-unit-status/computing-unit-status.service";
-import {
-  MountedModelInfo,
-  WorkflowComputingUnitManagingService,
-} from "../../../common/service/computing-unit/workflow-computing-unit/workflow-computing-unit-managing.service";
+import { ModelSelectionModalComponent } from "../model-selection-modal/model-selection-modal.component";
 
 interface ModelVariableRow {
   variableName: string;
@@ -41,11 +37,15 @@ interface ModelVariableRow {
 }
 
 /**
- * Property-editor widget for the Python UDF "Mounted model variables" property. It edits
- * a list of {variableName, modelPath} bindings: each row maps a Python variable to a
- * model mounted on the active computing unit. The model dropdown is populated from the
- * models currently mounted on that CU (see the "Mount models into computing unit"
- * action). At runtime each variable holds the model's local mount path.
+ * Property-editor widget for the Python UDF "Model variables" property. Each row
+ * binds a Python variable to a model version, chosen from everything this account can
+ * read; at run time the variable holds that model's local path inside the computing unit.
+ *
+ * Choosing a model is all the user does. The engine mounts whatever a UDF names when the
+ * worker starts (`ModelMountManager.ensureMounted`), so there is no separate step to
+ * perform and nothing to keep in sync — an earlier version of this widget listed only
+ * models already mounted on the active computing unit, which made a run's success depend
+ * on remembering to mount first.
  */
 @UntilDestroy()
 @Component({
@@ -60,22 +60,13 @@ interface ModelVariableRow {
     ɵNzTransitionPatchDirective,
     NzInputDirective,
     NzIconDirective,
-    NzSelectComponent,
-    NzOptionComponent,
     NzTooltipDirective,
   ],
 })
 export class ModelVariablesEditorComponent extends FieldType<FieldTypeConfig> implements OnInit {
   rows: ModelVariableRow[] = [];
-  mountedModelPaths: string[] = [];
-  loading = false;
-  activeCuid?: number;
-  activeCuIsKubernetes = false;
 
-  constructor(
-    private computingUnitStatusService: ComputingUnitStatusService,
-    private computingUnitService: WorkflowComputingUnitManagingService
-  ) {
+  constructor(private modalService: NzModalService) {
     super();
   }
 
@@ -87,43 +78,36 @@ export class ModelVariablesEditorComponent extends FieldType<FieldTypeConfig> im
           modelPath: row?.modelPath ?? "",
         }))
       : [];
-
-    this.computingUnitStatusService
-      .getSelectedComputingUnit()
-      .pipe(untilDestroyed(this))
-      .subscribe(unit => {
-        this.activeCuid = unit?.computingUnit?.cuid;
-        this.activeCuIsKubernetes = unit?.computingUnit?.type === "kubernetes";
-        this.loadMountedModels();
-      });
   }
 
-  private loadMountedModels(): void {
-    this.mountedModelPaths = [];
-    if (this.activeCuid == null || !this.activeCuIsKubernetes) {
-      return;
-    }
-    this.loading = true;
-    this.computingUnitService
-      .listMountedModels(this.activeCuid)
-      .pipe(untilDestroyed(this))
-      .subscribe({
-        next: (mounts: MountedModelInfo[]) => {
-          this.mountedModelPaths = mounts.map(mount => mount.modelPath).filter(path => !!path);
-          this.loading = false;
-        },
-        error: () => {
-          this.loading = false;
-        },
-      });
+  /** Opens the model/version picker and stores the chosen version's logical path. */
+  openModelPicker(index: number): void {
+    const modal = this.modalService.create({
+      nzContent: ModelSelectionModalComponent,
+      nzFooter: null,
+      nzData: { selectedPath: this.rows[index]?.modelPath || null },
+      nzBodyStyle: {
+        resize: "both",
+        overflow: "auto",
+        minHeight: "200px",
+        minWidth: "550px",
+        maxWidth: "90vw",
+        maxHeight: "80vh",
+      },
+      nzWidth: "fit-content",
+    });
+    modal.afterClose.pipe(untilDestroyed(this)).subscribe((selectedPath?: string) => {
+      if (!selectedPath) return;
+      this.rows = this.rows.map((row, rowIndex) => (rowIndex === index ? { ...row, modelPath: selectedPath } : row));
+      this.sync();
+    });
   }
 
-  /** Options for a row's dropdown, always including the row's own saved value. */
-  optionsForRow(row: ModelVariableRow): string[] {
-    if (row.modelPath && !this.mountedModelPaths.includes(row.modelPath)) {
-      return [row.modelPath, ...this.mountedModelPaths];
-    }
-    return this.mountedModelPaths;
+  /** The model and version, for a label that fits — the full path is the tooltip. */
+  describePath(modelPath: string): string {
+    const parts = modelPath.split("/").filter(part => part.length > 0);
+    // /models/ownerEmail/modelName/versionName
+    return parts.length >= 4 ? `${parts[2]} · ${parts[3]}` : modelPath;
   }
 
   addRow(): void {

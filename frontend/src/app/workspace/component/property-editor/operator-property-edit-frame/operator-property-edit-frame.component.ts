@@ -1038,9 +1038,9 @@ export class OperatorPropertyEditFrameComponent implements OnInit, OnChanges, On
         mappedField.type = "datasetversionselector";
       }
 
-      // Python UDF: bind models mounted on the active computing unit to variables.
-      // Replace formly's default array rendering with a single custom widget that owns
-      // the whole [{variableName, modelPath}] value, so strip the array scaffolding.
+      // Python UDF: bind model versions to Python variables. Replace formly's default
+      // array rendering with a single custom widget that owns the whole
+      // [{variableName, modelPath}] value, so strip the array scaffolding.
       if (mappedField.key === "modelVariables") {
         mappedField.type = "modelvariables";
         delete mappedField.fieldArray;

@@ -66,14 +66,13 @@ request in English. What the chatbot does on your behalf:
 dataset_create  -> dataset_upload_local_file(data/Iris.csv) -> dataset_create_version
 model_create    -> model_upload_local_file(artifacts/iris_embedding_classifier.pt)
                 -> model_upload_local_file(artifacts/metadata.json) -> model_create_version
-computing_unit_create -> computing_unit_mount_model
+computing_unit_create
 workflow_create -> workflow_open -> workflow_add_operator … -> workflow_validate -> workflow_run
 ```
 
-Two orderings in there are load-bearing and easy to miss. An uploaded file is staged, not committed, so
-it cannot be mounted until `model_create_version` runs. And a mount is pinned to one commit on one
-computing unit, so it has to exist before a run — a UDF whose `modelVariables` name an unmounted model
-fails on a path that does not exist.
+One ordering in there is load-bearing and easy to miss: an uploaded file is staged, not committed, so
+nothing can reference it until `model_create_version` runs. Mounting is not something anyone arranges —
+the UDF names a committed version and the worker mounts it on startup.
 
 The workflow the chatbot ends up building does the preprocessing and the analysis in Texera's own
 operators and uses exactly one Python UDF, for the model:
@@ -91,7 +90,8 @@ model = torch.load(os.path.join(IRIS_MODEL, "iris_embedding_classifier.pt"),
                    map_location="cpu", weights_only=True)
 ```
 
-`IRIS_MODEL` is bound by the operator's `modelVariables` property and set to the mount path at startup.
+`IRIS_MODEL` is bound by the operator's `modelVariables` property — pick the model in the property
+panel — and is set to the mount path at startup.
 The first `torch.load` pays for reading the gigabyte it actually needs; after that, scoring is
 sub-second.
 

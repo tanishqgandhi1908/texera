@@ -19,20 +19,10 @@
 
 <div class="model-variables">
   <div
-    *ngIf="activeCuid == null"
+    *ngIf="rows.length === 0"
     class="model-variables-hint">
-    Select a computing unit to mount models and bind them here.
-  </div>
-  <div
-    *ngIf="activeCuid != null && !activeCuIsKubernetes"
-    class="model-variables-hint">
-    Model mounting is only available on Kubernetes computing units.
-  </div>
-  <div
-    *ngIf="activeCuIsKubernetes && mountedModelPaths.length === 0 && !loading"
-    class="model-variables-hint">
-    No models are mounted on the active computing unit yet. Use "Mount models into computing unit" on the computing unit
-    to add one.
+    Bind a model to a Python variable to read it from your code. It is mounted into the computing unit when the workflow
+    runs.
   </div>
 
   <div
@@ -45,18 +35,17 @@
       [(ngModel)]="row.variableName"
       (ngModelChange)="onRowChange()" />
     <span class="model-variable-arrow">=</span>
-    <nz-select
+    <button
+      nz-button
       class="model-variable-select"
-      nzShowSearch
-      nzAllowClear
-      nzPlaceHolder="mounted model"
-      [(ngModel)]="row.modelPath"
-      (ngModelChange)="onRowChange()">
-      <nz-option
-        *ngFor="let path of optionsForRow(row)"
-        [nzValue]="path"
-        [nzLabel]="path"></nz-option>
-    </nz-select>
+      nz-tooltip
+      [nzTooltipTitle]="row.modelPath || 'Choose a model version'"
+      (click)="openModelPicker(i)">
+      <i
+        nz-icon
+        nzType="experiment"></i>
+      <span class="model-variable-label">{{ row.modelPath ? describePath(row.modelPath) : "Select model" }}</span>
+    </button>
     <i
       nz-icon
       nzType="delete"

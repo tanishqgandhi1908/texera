@@ -23,9 +23,13 @@ import com.fasterxml.jackson.annotation.{JsonProperty, JsonPropertyDescription}
 import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaTitle
 
 /**
-  * One row of the Python UDF's "Mounted model variables" property: it binds a model
-  * version already mounted on the computing unit to a Python variable. At runtime the
-  * variable holds the model's local (in-pod) mount path as a string.
+  * One row of the Python UDF's "Model variables" property: it binds a model
+  * version to a Python variable. At runtime the variable holds the model's local
+  * (in-pod) mount path as a string.
+  *
+  * Naming the version here is all that is required. The worker mounts whatever its
+  * bindings refer to when it starts, so a version does not have to be mounted on the
+  * computing unit beforehand.
   */
 class ModelVariableMapping {
   @JsonProperty(required = true, defaultValue = "")
@@ -36,7 +40,9 @@ class ModelVariableMapping {
   var variableName: String = ""
 
   @JsonProperty(required = true, defaultValue = "")
-  @JsonSchemaTitle("Mounted model")
-  @JsonPropertyDescription("A model version mounted on this computing unit")
+  @JsonSchemaTitle("Model")
+  @JsonPropertyDescription(
+    "A model version you own or have access to. It is mounted into the computing unit when the workflow runs."
+  )
   var modelPath: String = ""
 }

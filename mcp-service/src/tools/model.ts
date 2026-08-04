@@ -57,15 +57,16 @@ import { openLocalFile } from "../local-file";
  * Python UDF opens a multi-gigabyte checkpoint without the pod ever
  * downloading it.
  *
- * Three orderings are easy to get wrong and are repeated into the tool
- * descriptions, because each produces something that looks finished and does
- * not work:
+ * One ordering is easy to get wrong and is repeated into the tool descriptions,
+ * because it produces something that looks finished and does not work:
  *
- *   upload -> model_create_version   an uncommitted file cannot be mounted
- *   version -> computing_unit_mount  a mount is pinned to one commit
- *   mount -> modelVariables          the UDF needs the variable bound to it
+ *   upload -> model_create_version   an uncommitted file cannot be referenced
+ *
+ * Mounting is not part of it. A UDF names the committed version it needs in its
+ * `modelVariables` property and the worker mounts it on startup, so there is no
+ * step between committing a version and using it.
  */
-const COMMIT_NOTE = "Uploads are staged, and cannot be mounted or read, until model_create_version commits them.";
+const COMMIT_NOTE = "Uploads are staged, and cannot be read or referenced, until model_create_version commits them.";
 
 /** Resolves a version by id, by name, or (default) the newest one. */
 async function resolveModelVersion(
@@ -149,7 +150,7 @@ export function registerModelTools(server: McpServer, context: McpContext): void
     title: "Show a model and its versions",
     description:
       "Show one model's metadata and every version, including each version's commit hash and the " +
-      "locator that mounts it. Use this to find the version to mount or to reference from a Python UDF.",
+      "locator that identifies it. Use this to find the model path to reference from a Python UDF.",
     inputSchema: { mid: z.number().int().describe("Model id, from model_list") },
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: async (args: { mid: number }, ctx) => {
@@ -328,8 +329,8 @@ export function registerModelTools(server: McpServer, context: McpContext): void
     name: "model_list_versions",
     title: "List a model's versions",
     description:
-      "List every committed version with its commit hash, the `/models/...` path a Python UDF references, " +
-      "and the locator that mounts it.",
+      "List every committed version with its commit hash and the `/models/...` path a Python UDF " +
+      "references from its modelVariables property.",
     inputSchema: { mid: z.number().int().describe("Model id") },
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: async (args: { mid: number }, ctx) => {
@@ -361,8 +362,8 @@ export function registerModelTools(server: McpServer, context: McpContext): void
     title: "Commit staged model files as a version",
     description:
       "Commit everything currently staged into a new, immutable version. This is the step that makes " +
-      "uploaded weights mountable — until it runs, a computing unit has nothing to pin a mount to. " +
-      "Fails when nothing is staged.",
+      "uploaded weights usable — a UDF binds a committed version, so until this runs there is nothing " +
+      "to reference. Fails when nothing is staged.",
     inputSchema: {
       mid: z.number().int().describe("Model id"),
       version_name: z
@@ -390,7 +391,8 @@ export function registerModelTools(server: McpServer, context: McpContext): void
         `Created version "${created.modelVersion.name}" (mvid ${created.modelVersion.mvid}) of model ${args.mid}.\n` +
         `Model path: ${modelVersionRootPath(entry.ownerEmail, entry.model.name, created.modelVersion.name)}\n` +
         `Mount locator: ${modelLocator(entry.model, created.modelVersion)}\n` +
-        `Next: computing_unit_mount_model to make it readable inside a computing unit.`
+        `Next: bind the model path to a variable in a Python UDF's modelVariables property. ` +
+        `It is mounted into the computing unit automatically when the workflow runs.`
       );
     },
   });

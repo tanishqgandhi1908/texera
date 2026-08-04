@@ -53,9 +53,9 @@ Three rules are not obvious from the tool names and cause silent failures if ign
 2. Workflow edits are in memory. workflow_open loads a workflow; the workflow_* editing tools change a
    local copy; workflow_save writes it back. Nothing is persisted until you save. (workflow_run is the
    exception — it runs the in-memory graph, so you can test before saving.)
-3. A model must be mounted before a UDF can read it. A mount is pinned to one committed version and
-   belongs to one computing unit: computing_unit_mount_model, then bind a modelVariables entry on the
-   Python UDF operator to the same /models/... path. Without the mount the variable points nowhere.
+3. A model is reached by binding it, not by mounting it. Put a modelVariables entry on the Python UDF
+   operator naming a committed version's /models/... path; the engine mounts it into the computing unit
+   when the worker starts and sets that variable to its local path. There is no mount step to perform.
 
 A typical build-from-data conversation:
   dataset_create -> dataset_upload_file -> dataset_create_version -> dataset_list_files (copy the workflow path)
@@ -63,7 +63,7 @@ A typical build-from-data conversation:
   -> workflow_run -> workflow_save
 
 And with a trained model in it:
-  model_create -> model_upload_local_file -> model_create_version -> computing_unit_mount_model
+  model_create -> model_upload_local_file -> model_create_version
   -> workflow_add_operator("PythonUDFV2", properties with modelVariables) -> workflow_run
 
 Opening a workflow also joins its shared-editing room, so the user sees you in the participant list and
