@@ -24,6 +24,7 @@ import { MODELS_INPUT_TYPE } from "../../service/code-editor/ui-udf-parameters-p
 type UiUdfParameterColumn = Readonly<{ label: string; key: string; parentKey?: string; disabled: boolean }>;
 
 const VALUE_COLUMN: UiUdfParameterColumn = { label: "Value", key: "value", disabled: false };
+const TYPE_COLUMN_KEY = "attributeType";
 
 /** Renders inferred Python UDF UI parameters with editable values and locked name/type columns. */
 @Component({
@@ -49,6 +50,16 @@ export class UiUdfParametersComponent extends FieldArrayType<FormlyFieldConfig> 
     // and every row keeps the default text editor.
     const rows = (field.model ?? []) as ReadonlyArray<{ inputType?: string }>;
     field.fieldGroup?.forEach((rowField, index) => this.configureRowFields(rowField, rows[index]));
+  }
+
+  /**
+   * Whether the Type cell should show the row's kind rather than its attribute type.
+   *
+   * A models parameter carries a path, so its attribute type is "string" and saying so
+   * tells the reader nothing about the row they are looking at.
+   */
+  showsKindInsteadOfType(column: UiUdfParameterColumn, parameter: { inputType?: string }): boolean {
+    return column.key === TYPE_COLUMN_KEY && parameter?.inputType === MODELS_INPUT_TYPE;
   }
 
   /** Finds the Formly field config that backs one visible column in a parameter row. */

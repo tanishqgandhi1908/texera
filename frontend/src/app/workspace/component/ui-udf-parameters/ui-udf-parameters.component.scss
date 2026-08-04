@@ -50,3 +50,12 @@
 :host ::ng-deep .ant-form-item-label {
   display: none;
 }
+
+.ui-udf-parameter-kind {
+  // Matches the height of the disabled inputs it sits beside, so the row stays aligned.
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 8px;
+  color: rgba(0, 0, 0, 0.65);
+}
