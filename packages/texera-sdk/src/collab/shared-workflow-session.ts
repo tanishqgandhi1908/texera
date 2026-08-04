@@ -190,9 +190,18 @@ export class SharedWorkflowSession {
   replaceContent(content: SharedWorkflowGraph): void {
     if (this.destroyed) return;
     this.doc.transact(() => {
-      reconcileMap(this.operatorMap, content.operators, operator => operator.operatorID);
-      reconcileMap(this.linkMap, content.links, link => link.linkID);
-      reconcileMap(this.commentBoxMap, content.commentBoxes ?? [], box => box.commentBoxID);
+      // Operators and comment boxes are stored converted (Y.Map with Y.Text
+      // fields) so two people can type into the same field; links and positions
+      // are stored as plain objects. That asymmetry is the workspace's, not a
+      // choice available here — `SharedModel` declares
+      // `Y.Map<YType<OperatorPredicate>>` against `Y.Map<OperatorLink>`, and
+      // `SharedModelChangeHandler` reads each accordingly. Writing a link as a
+      // Y.Map makes `link.source.operatorID` come back undefined in the
+      // browser, which drops the link from the canvas and takes the workspace
+      // down with it.
+      reconcileMap(this.operatorMap, content.operators, operator => operator.operatorID, "converted");
+      reconcileMap(this.linkMap, content.links, link => link.linkID, "plain");
+      reconcileMap(this.commentBoxMap, content.commentBoxes ?? [], box => box.commentBoxID, "converted");
 
       const positions = content.operatorPositions ?? {};
       for (const [id, position] of Object.entries(positions)) {
@@ -247,13 +256,29 @@ export class SharedWorkflowSession {
   }
 }
 
-/** Adds, updates and removes entries so `map` holds exactly `items`. */
-function reconcileMap<T extends object>(map: Y.Map<unknown>, items: readonly T[], keyOf: (item: T) => string): void {
+/**
+ * Adds, updates and removes entries so `map` holds exactly `items`.
+ *
+ * `storage` picks how a value is written: `"converted"` builds the nested
+ * Y.Map/Y.Text shape, so concurrent edits to different fields of one entry
+ * merge; `"plain"` stores the object as a single opaque value, which is what
+ * the workspace expects for entries it only ever replaces wholesale.
+ */
+function reconcileMap<T extends object>(
+  map: Y.Map<unknown>,
+  items: readonly T[],
+  keyOf: (item: T) => string,
+  storage: "converted" | "plain"
+): void {
   const wanted = new Set<string>();
   for (const item of items) {
     const key = keyOf(item);
     wanted.add(key);
-    setYMapEntry(map, key, item);
+    if (storage === "converted") {
+      setYMapEntry(map, key, item);
+    } else if (!deepEqual(map.get(key), item)) {
+      map.set(key, item);
+    }
   }
   for (const key of [...map.keys()]) {
     if (!wanted.has(key)) map.delete(key);

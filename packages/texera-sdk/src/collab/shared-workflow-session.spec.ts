@@ -19,6 +19,7 @@
 
 import { describe, expect, it, afterEach, beforeAll, afterAll } from "bun:test";
 import { spawn, type Subprocess } from "bun";
+import * as Y from "yjs";
 import { SharedWorkflowSession, sharedEditingUrl } from "./shared-workflow-session";
 import type { OperatorPredicate, WorkflowContent } from "../types/workflow";
 
@@ -132,6 +133,61 @@ describe("SharedWorkflowSession", () => {
     claude.replaceContent(content([operator("udf-1", "print('hi')")]));
     expect(claude.isEmpty()).toBe(false);
     expect(claude.readContent().operators.map(op => op.operatorID)).toEqual(["udf-1"]);
+  });
+
+  it("stores links and positions plainly, and operators converted", async () => {
+    // The workspace types these differently — Y.Map<YType<OperatorPredicate>>
+    // against Y.Map<OperatorLink> — and reads each accordingly. A link written
+    // as a Y.Map comes back with source.operatorID undefined in the browser,
+    // which drops it from the canvas and breaks the workspace.
+    const claude = join(6, "Claude");
+    await claude.connect();
+
+    const graph = content([operator("udf-1", "a = 1"), operator("udf-2", "a = 2")]);
+    claude.replaceContent({
+      ...graph,
+      links: [
+        {
+          linkID: "link-1",
+          source: { operatorID: "udf-1", portID: "output-0" },
+          target: { operatorID: "udf-2", portID: "input-0" },
+        },
+      ],
+    });
+
+    const doc = claude.doc;
+    expect(doc.getMap("operatorIDMap").get("udf-1")).toBeInstanceOf(Y.Map);
+    expect(doc.getMap("operatorLinkMap").get("link-1")).not.toBeInstanceOf(Y.Map);
+    expect(doc.getMap("elementPositionMap").get("udf-1")).not.toBeInstanceOf(Y.Map);
+
+    // The stored link is directly readable, the way the change handler reads it.
+    const link = doc.getMap("operatorLinkMap").get("link-1") as any;
+    expect(link.source.operatorID).toEqual("udf-1");
+    expect(link.target.portID).toEqual("input-0");
+    expect(claude.readContent().links).toHaveLength(1);
+  });
+
+  it("replaces a link a previous client stored in the wrong shape", async () => {
+    const claude = join(7, "Claude");
+    await claude.connect();
+
+    // Simulate the room left behind by a client that converted links.
+    const wrong = new Y.Map<unknown>();
+    claude.doc.getMap("operatorLinkMap").set("link-1", wrong);
+    wrong.set("linkID", new Y.Text("link-1"));
+
+    claude.replaceContent({
+      ...content([operator("udf-1", "a = 1")]),
+      links: [
+        {
+          linkID: "link-1",
+          source: { operatorID: "udf-1", portID: "output-0" },
+          target: { operatorID: "udf-2", portID: "input-0" },
+        },
+      ],
+    });
+
+    expect(claude.doc.getMap("operatorLinkMap").get("link-1")).not.toBeInstanceOf(Y.Map);
   });
 
   it("propagates edits to another participant in the same room", async () => {
