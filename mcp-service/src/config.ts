@@ -59,6 +59,16 @@ export interface McpConfig {
   localFileRoot?: string;
   /** Part size for multipart uploads. */
   multipartPartBytes: number;
+  /**
+   * Where `workflow_run` sends its request, with `{cuid}` substituted.
+   *
+   * On Kubernetes each computing unit is its own pod serving
+   * `POST /api/execution/{wid}/{cuid}/run` itself, and a deployment's gateway
+   * may not route that path — so unlike every other endpoint it is not
+   * necessarily reachable at the deployment origin. Unset means "the same
+   * origin as everything else", which is right for a single-node stack.
+   */
+  executionEndpointTemplate?: string;
 }
 
 export class ConfigError extends Error {
@@ -181,6 +191,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       DEFAULTS.multipartPartBytes,
       "TEXERA_MULTIPART_PART_BYTES"
     ),
+    executionEndpointTemplate: env.TEXERA_EXECUTION_URL?.trim() || undefined,
   };
 }
 

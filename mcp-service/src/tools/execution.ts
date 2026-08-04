@@ -20,6 +20,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
+  TexeraApiError,
   createComputingUnit,
   getComputingUnitLimitOptions,
   getComputingUnitTypes,
@@ -412,14 +413,33 @@ export function registerExecutionTools(server: McpServer, context: McpContext): 
       );
       if (missingMounts) throw new ToolError(missingMounts);
 
-      const result = await runWorkflowSync(ctx.client, {
-        workflowId: session.wid,
-        computingUnitId: unit.computingUnit.cuid,
-        plan,
-        executionName: `mcp-${new Date().toISOString().slice(0, 19)}`,
-        targetOperatorIds: targets,
-        timeoutSeconds: args.timeout_seconds ?? ctx.config.defaultRunTimeoutSeconds,
-      });
+      let result;
+      try {
+        result = await runWorkflowSync(ctx.client, {
+          workflowId: session.wid,
+          computingUnitId: unit.computingUnit.cuid,
+          plan,
+          executionName: `mcp-${new Date().toISOString().slice(0, 19)}`,
+          targetOperatorIds: targets,
+          timeoutSeconds: args.timeout_seconds ?? ctx.config.defaultRunTimeoutSeconds,
+        });
+      } catch (error) {
+        // Every other endpoint lives behind the deployment's one gateway
+        // hostname; this one is served by the computing unit's own pod, and a
+        // deployment may not route /api/execution to it. A bare 404 here reads
+        // as a missing workflow, which sends the caller looking in the wrong
+        // place entirely.
+        if (error instanceof TexeraApiError && error.isNotFound && !ctx.config.executionEndpointTemplate) {
+          throw new ToolError(
+            `The deployment at ${ctx.config.baseUrl} has no /api/execution route, so this workflow cannot be ` +
+              `run from here. That endpoint is served by the computing unit's own pod rather than by the ` +
+              `gateway, and a Kubernetes deployment does not always expose it. Set TEXERA_EXECUTION_URL to ` +
+              `the unit's address (with "{cuid}" where the id goes) to run from this client. Everything ` +
+              `else works regardless, so the workflow can still be saved here and run from the workspace UI.`
+          );
+        }
+        throw error;
+      }
 
       return joinSections(
         `Ran workflow ${session.wid} "${session.name}" on computing unit ${unit.computingUnit.cuid}` +

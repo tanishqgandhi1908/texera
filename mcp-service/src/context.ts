@@ -40,6 +40,7 @@ export function createContext(config: McpConfig): McpContext {
     baseUrl: config.baseUrl,
     token: config.token,
     defaultTimeoutMs: config.requestTimeoutMs,
+    executionEndpointTemplate: config.executionEndpointTemplate,
   });
 
   const sessions = new EditSessionStore();
