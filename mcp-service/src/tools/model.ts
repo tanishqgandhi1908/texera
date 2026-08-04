@@ -63,7 +63,7 @@ import { openLocalFile } from "../local-file";
  *   upload -> model_create_version   an uncommitted file cannot be referenced
  *
  * Mounting is not part of it. A UDF names the committed version it needs in its
- * `modelVariables` property and the worker mounts it on startup, so there is no
+ * models UI parameter and the worker mounts it on startup, so there is no
  * step between committing a version and using it.
  */
 const COMMIT_NOTE = "Uploads are staged, and cannot be read or referenced, until model_create_version commits them.";
@@ -330,7 +330,7 @@ export function registerModelTools(server: McpServer, context: McpContext): void
     title: "List a model's versions",
     description:
       "List every committed version with its commit hash and the `/models/...` path a Python UDF " +
-      "references from its modelVariables property.",
+      "references from a models UI parameter.",
     inputSchema: { mid: z.number().int().describe("Model id") },
     annotations: { readOnlyHint: true, idempotentHint: true },
     handler: async (args: { mid: number }, ctx) => {
@@ -391,7 +391,8 @@ export function registerModelTools(server: McpServer, context: McpContext): void
         `Created version "${created.modelVersion.name}" (mvid ${created.modelVersion.mvid}) of model ${args.mid}.\n` +
         `Model path: ${modelVersionRootPath(entry.ownerEmail, entry.model.name, created.modelVersion.name)}\n` +
         `Mount locator: ${modelLocator(entry.model, created.modelVersion)}\n` +
-        `Next: bind the model path to a variable in a Python UDF's modelVariables property. ` +
+        `Next: declare self.UiParameter("NAME", UiParameterType.MODELS) in a Python UDF and set that ` +
+        `row's value in its uiParameters property to this path. ` +
         `It is mounted into the computing unit automatically when the workflow runs.`
       );
     },
@@ -432,7 +433,7 @@ export function registerModelTools(server: McpServer, context: McpContext): void
           files.map(file => [file.relativePath, formatBytes(file.sizeBytes), `<mount>/${file.relativePath}`])
         ),
         `A Python UDF reads these as os.path.join(<variable>, "<file>"), where <variable> is the ` +
-          `modelVariables name bound to this model.`
+          `models UI parameter bound to this model.`
       );
     },
   });

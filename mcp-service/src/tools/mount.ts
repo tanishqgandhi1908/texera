@@ -28,7 +28,7 @@ import { registerTool } from "../register";
  * Reading what a computing unit has mounted.
  *
  * Mounting itself is not something a caller does. A Python UDF names the model
- * versions it needs in its `modelVariables` property, and the engine mounts
+ * versions it needs through a models UI parameter, and the engine mounts
  * them when the worker starts — the pod gets the version as a read-only FUSE
  * filesystem, nothing is copied, and only the bytes the UDF reads cross the
  * network. So binding the variable is the whole of the work, and there is no
@@ -44,7 +44,7 @@ export function registerMountTools(server: McpServer, context: McpContext): void
     title: "List the models mounted on a computing unit",
     description:
       "Show which model versions are currently readable inside a computing unit, and where each one " +
-      "appears in its filesystem. Diagnostic only — the engine mounts what a UDF's modelVariables name " +
+      "appears in its filesystem. Diagnostic only — the engine mounts what a UDF's models parameters name " +
       "when the worker starts, so a model missing here before a run is not a problem.",
     inputSchema: { cuid: z.number().int().describe("Computing unit id") },
     annotations: { readOnlyHint: true, idempotentHint: true },

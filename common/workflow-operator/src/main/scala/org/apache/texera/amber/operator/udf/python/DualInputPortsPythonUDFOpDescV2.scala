@@ -89,6 +89,16 @@ class DualInputPortsPythonUDFOpDescV2 extends LogicalOp {
   )
   var outputColumns: List[Attribute] = List()
 
+
+  @JsonProperty()
+  @JsonSchemaTitle("UI parameters")
+  @JsonPropertyDescription(
+    "Values for the self.UiParameter(...) calls declared in the code above. Rows appear as you " +
+      "declare them; a parameter of type models is filled from the model picker and reaches your " +
+      "code as the local path that model version is mounted at."
+  )
+  var uiParameters: List[UiUDFParameter] = List()
+
   override def getPhysicalOp(
       workflowId: WorkflowIdentity,
       executionId: ExecutionIdentity
@@ -106,13 +116,20 @@ class DualInputPortsPythonUDFOpDescV2 extends LogicalOp {
         trimmed
       }
 
+    // UI parameter values are baked into the code the worker runs; models parameters
+
+    // additionally tell us which model versions that worker has to mount first.
+
+    val (executedCode, mountedModels) = PythonUdfUiParameterSupport.injectInto(code, uiParameters)
+
+
     val physicalOp = if (workers > 1) {
       PhysicalOp
         .oneToOnePhysicalOp(
           workflowId,
           executionId,
           operatorIdentifier,
-          OpExecWithCode(code, "python")
+          OpExecWithCode(executedCode, "python")
         )
         .withParallelizable(true)
         .withSuggestedWorkerNum(workers)
@@ -122,7 +139,7 @@ class DualInputPortsPythonUDFOpDescV2 extends LogicalOp {
           workflowId,
           executionId,
           operatorIdentifier,
-          OpExecWithCode(code, "python")
+          OpExecWithCode(executedCode, "python")
         )
         .withParallelizable(false)
     }
@@ -154,6 +171,7 @@ class DualInputPortsPythonUDFOpDescV2 extends LogicalOp {
         })
       )
       .withPveName(pveName)
+      .withMountedModels(mountedModels)
   }
 
   override def operatorInfo: OperatorInfo =

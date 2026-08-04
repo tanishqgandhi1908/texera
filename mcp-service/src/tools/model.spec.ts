@@ -130,7 +130,7 @@ describe("model tools", () => {
 
     const output = await harness.call("model_create_version", { mid: 5, version_name: "trained" });
     expect(output).toContain("Mount locator: model-5:5226497070d1");
-    expect(output).toContain("modelVariables");
+    expect(output).toContain("UiParameterType.MODELS");
     expect(output).not.toContain("computing_unit_mount_model");
     // The endpoint takes a bare string body, not JSON.
     expect(deployment.recorded("POST", "/api/model/5/version/create")[0].body).toEqual("trained");

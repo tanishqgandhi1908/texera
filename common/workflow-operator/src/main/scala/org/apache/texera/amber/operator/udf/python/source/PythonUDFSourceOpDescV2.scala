@@ -22,6 +22,7 @@ package org.apache.texera.amber.operator.udf.python.source
 import com.fasterxml.jackson.annotation.{JsonProperty, JsonPropertyDescription}
 import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaTitle
 import org.apache.texera.amber.core.executor.OpExecWithCode
+import org.apache.texera.amber.operator.udf.python.{PythonUdfUiParameterSupport, UiUDFParameter}
 import org.apache.texera.amber.core.tuple.{Attribute, Schema}
 import org.apache.texera.amber.core.virtualidentity.{ExecutionIdentity, WorkflowIdentity}
 import org.apache.texera.amber.core.workflow.{OutputPort, PhysicalOp, SchemaPropagationFunc}
@@ -66,10 +67,24 @@ class PythonUDFSourceOpDescV2 extends SourceOperatorDescriptor {
   @JsonPropertyDescription("The columns of the source")
   var columns: List[Attribute] = List.empty
 
+
+  @JsonProperty()
+  @JsonSchemaTitle("UI parameters")
+  @JsonPropertyDescription(
+    "Values for the self.UiParameter(...) calls declared in the code above. Rows appear as you " +
+      "declare them; a parameter of type models is filled from the model picker and reaches your " +
+      "code as the local path that model version is mounted at."
+  )
+  var uiParameters: List[UiUDFParameter] = List()
+
   override def getPhysicalOp(
       workflowId: WorkflowIdentity,
       executionId: ExecutionIdentity
   ): PhysicalOp = {
+    // UI parameter values are baked into the code the worker runs; models parameters
+    // additionally tell us which model versions that worker has to mount first.
+    val (executedCode, mountedModels) = PythonUdfUiParameterSupport.injectInto(code, uiParameters)
+
     require(workers >= 1, "Need at least 1 worker.")
 
     val pveName =
@@ -84,7 +99,7 @@ class PythonUDFSourceOpDescV2 extends SourceOperatorDescriptor {
       }
 
     val physicalOp = PhysicalOp
-      .sourcePhysicalOp(workflowId, executionId, operatorIdentifier, OpExecWithCode(code, "python"))
+      .sourcePhysicalOp(workflowId, executionId, operatorIdentifier, OpExecWithCode(executedCode, "python"))
       .withInputPorts(operatorInfo.inputPorts)
       .withOutputPorts(operatorInfo.outputPorts)
       .withIsOneToManyOp(true)
@@ -93,6 +108,7 @@ class PythonUDFSourceOpDescV2 extends SourceOperatorDescriptor {
       )
       .withLocationPreference(Option.empty)
       .withPveName(pveName)
+      .withMountedModels(mountedModels)
 
     if (workers > 1) {
       physicalOp
