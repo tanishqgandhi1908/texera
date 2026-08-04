@@ -31,7 +31,6 @@ import { NzTagComponent } from "ng-zorro-antd/tag";
 import { ɵNzTransitionPatchDirective } from "ng-zorro-antd/core/transition-patch";
 import { NzIconDirective } from "ng-zorro-antd/icon";
 import { NzButtonComponent } from "ng-zorro-antd/button";
-import { NzPopoverDirective } from "ng-zorro-antd/popover";
 import { NzSwitchComponent } from "ng-zorro-antd/switch";
 import { FormsModule } from "@angular/forms";
 import { NzLayoutComponent, NzContentComponent, NzSiderComponent } from "ng-zorro-antd/layout";
@@ -98,7 +97,6 @@ export const ABORT_RETRY_BACKOFF_BASE_MS = 100;
     ɵNzTransitionPatchDirective,
     NzIconDirective,
     NzButtonComponent,
-    NzPopoverDirective,
     NzSwitchComponent,
     FormsModule,
     MarkdownDescriptionComponent,
