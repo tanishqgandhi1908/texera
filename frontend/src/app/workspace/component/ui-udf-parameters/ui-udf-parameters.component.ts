@@ -44,7 +44,11 @@ export class UiUdfParametersComponent extends FieldArrayType<FormlyFieldConfig> 
   override onPopulate(field: FormlyFieldConfig): void {
     this.configureRowTemplate(this.getFieldArrayTemplate(field));
     super.onPopulate(field);
-    field.fieldGroup?.forEach(rowField => this.configureRowFields(rowField));
+    // Row data comes from the array being populated, not from rowField.model: Formly has
+    // not assigned the per-row model yet at this point, so reading it there sees undefined
+    // and every row keeps the default text editor.
+    const rows = (field.model ?? []) as ReadonlyArray<{ inputType?: string }>;
+    field.fieldGroup?.forEach((rowField, index) => this.configureRowFields(rowField, rows[index]));
   }
 
   /** Finds the Formly field config that backs one visible column in a parameter row. */
@@ -60,21 +64,21 @@ export class UiUdfParametersComponent extends FieldArrayType<FormlyFieldConfig> 
     this.configureRowColumns(rowField, this.setDisabledMetadata.bind(this));
   }
 
-  private configureRowFields(rowField: FormlyFieldConfig | undefined): void {
+  private configureRowFields(rowField: FormlyFieldConfig | undefined, row?: { inputType?: string }): void {
     this.configureRowColumns(rowField, this.configureDisabledState.bind(this));
-    this.configureValueEditor(rowField);
+    this.configureValueEditor(rowField, row);
   }
 
   /**
    * Swaps the Value cell for the model picker on a models parameter. The kind comes from the
    * row's own data because it was inferred from the UDF's code, not chosen on the row.
    */
-  private configureValueEditor(rowField: FormlyFieldConfig | undefined): void {
+  private configureValueEditor(rowField: FormlyFieldConfig | undefined, row?: { inputType?: string }): void {
     if (!rowField) return;
     const valueField = this.getColumnField(rowField, VALUE_COLUMN);
     if (!valueField) return;
 
-    const inputType = (rowField.model as { inputType?: string } | undefined)?.inputType;
+    const inputType = row?.inputType ?? (rowField.model as { inputType?: string } | undefined)?.inputType;
     if (inputType === MODELS_INPUT_TYPE) valueField.type = "modelvalue";
   }
 

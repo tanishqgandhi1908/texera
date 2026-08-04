@@ -19,13 +19,28 @@
 
 .ui-udf-parameter-row {
   display: grid;
-  grid-template-columns: 250px 250px 1fr;
-  gap: 12px;
+  // Proportional rather than fixed: the property panel is a few hundred pixels wide, and
+  // fixed 250px columns pushed the third one off the end so the type read as one letter.
+  // Value carries a model path or free text and needs the most room; type the least.
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 8px;
   align-items: start;
 }
 
 .field-cell {
   min-width: 0;
+}
+
+// Formly renders a select for the type column; without this it keeps its intrinsic
+// width and overflows the cell rather than shrinking into it.
+.field-cell ::ng-deep .ant-select,
+.field-cell ::ng-deep input {
+  width: 100%;
+}
+
+.col-title {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
 }
 
 :host ::ng-deep .ant-form-item {
