@@ -73,6 +73,7 @@ import { NzWaveDirective } from "ng-zorro-antd/core/wave";
 import { WorkflowPveService } from "../../../service/virtual-environment/virtual-environment.service";
 import { ComputingUnitStatusService } from "../../../../common/service/computing-unit/computing-unit-status/computing-unit-status.service";
 import { of } from "rxjs";
+import { UiUdfParametersSyncService } from "../../../service/code-editor/ui-udf-parameters-sync.service";
 import { map, switchMap, take } from "rxjs/operators";
 
 Quill.register("modules/cursors", QuillCursors);
@@ -460,8 +461,40 @@ export class OperatorPropertyEditFrameComponent implements OnInit, OnChanges, On
     private workflowStatusSerivce: WorkflowStatusService,
     private config: GuiConfigService,
     private workflowPveService: WorkflowPveService,
-    private computingUnitStatusService: ComputingUnitStatusService
+    private computingUnitStatusService: ComputingUnitStatusService,
+    private uiUdfParametersSyncService: UiUdfParametersSyncService
   ) {}
+
+  /**
+   * Keeps the uiParameters property in step with the parameters declared in the UDF's code.
+   *
+   * The rows are the code's to define, so the panel follows it: adding a self.UiParameter(...)
+   * call adds a row, removing one takes it away, and values already entered are preserved by
+   * the sync service. A parse error is surfaced rather than silently leaving stale rows,
+   * because the alternative is a panel that quietly disagrees with the code beside it.
+   */
+  private registerUiUdfParametersHandler(): void {
+    this.uiUdfParametersSyncService.uiParametersChanged$
+      .pipe(untilDestroyed(this))
+      .subscribe(({ operatorId, parameters }) => {
+        const operator = this.workflowActionService.getTexeraGraph().getOperator(operatorId);
+        if (!operator) return;
+        if (isEqual(operator.operatorProperties?.uiParameters ?? [], parameters)) return;
+
+        this.workflowActionService.setOperatorProperty(operatorId, {
+          ...operator.operatorProperties,
+          uiParameters: parameters,
+        });
+      });
+
+    this.uiUdfParametersSyncService.uiParametersParseError$
+      .pipe(untilDestroyed(this))
+      .subscribe(({ operatorId, message }) => {
+        if (message && operatorId === this.currentOperatorId) {
+          this.notificationService.error(message);
+        }
+      });
+  }
 
   private patchPythonUdfEnvironmentSchema(schema: CustomJSONSchema7, environments: string[]): CustomJSONSchema7 {
     const patchedSchema = cloneDeep(schema);
@@ -507,6 +540,8 @@ export class OperatorPropertyEditFrameComponent implements OnInit, OnChanges, On
     this.registerDisableEditorInteractivityHandler();
 
     this.registerOperatorDisplayNameChangeHandler();
+
+    this.registerUiUdfParametersHandler();
 
     this.workflowStatusSerivce
       .getStatusUpdateStream()
@@ -1038,13 +1073,11 @@ export class OperatorPropertyEditFrameComponent implements OnInit, OnChanges, On
         mappedField.type = "datasetversionselector";
       }
 
-      // Python UDF: bind model versions to Python variables. Replace formly's default
-      // array rendering with a single custom widget that owns the whole
-      // [{variableName, modelPath}] value, so strip the array scaffolding.
-      if (mappedField.key === "modelVariables") {
-        mappedField.type = "modelvariables";
-        delete mappedField.fieldArray;
-        delete mappedField.fieldGroup;
+      // Python UDF: values for the self.UiParameter(...) calls declared in the code. Rows are
+      // inferred from that code, so the widget owns the whole list and renders name and type
+      // read-only beside the editable value.
+      if (mappedField.key === "uiParameters") {
+        mappedField.type = "ui-udf-parameters";
         if (!Array.isArray(mappedField.defaultValue)) {
           mappedField.defaultValue = [];
         }

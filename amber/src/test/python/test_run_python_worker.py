@@ -38,7 +38,6 @@ def _full_config() -> dict:
     return {
         "workerId": "worker-1",
         "outputPort": "5005",
-        "mountedModels": "{}",
         "loggerLevel": "INFO",
         "rPath": "",
         "icebergCatalogType": "postgres",
@@ -132,29 +131,6 @@ def test_main_mapping_is_independent_of_key_order():
     python_worker.assert_called_once_with(
         worker_id="worker-1", host="localhost", output_port=5005
     )
-
-
-def test_main_exposes_mounted_models_bindings_when_present(monkeypatch):
-    monkeypatch.delenv("MOUNTED_MODELS", raising=False)
-    config = _full_config()
-    bindings = '{"M": "/mnt/texera-mounts/model-1/abc123"}'
-    config["mountedModels"] = bindings
-    storage_patch, worker_patch, _logger_patch = _patched_collaborators()
-    with storage_patch, worker_patch, _logger_patch:
-        import os
-
-        entry.main(_encode(config))
-        assert os.environ["MOUNTED_MODELS"] == bindings
-
-
-def test_main_exposes_empty_mounted_models_when_none_bound(monkeypatch):
-    monkeypatch.delenv("MOUNTED_MODELS", raising=False)
-    storage_patch, worker_patch, _logger_patch = _patched_collaborators()
-    with storage_patch, worker_patch, _logger_patch:
-        import os
-
-        entry.main(_encode(_full_config()))
-        assert os.environ["MOUNTED_MODELS"] == "{}"
 
 
 def test_main_sets_r_home_when_r_path_present(monkeypatch):

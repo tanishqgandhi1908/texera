@@ -19,8 +19,11 @@
 import { Component } from "@angular/core";
 import { NgFor, NgIf } from "@angular/common";
 import { FieldArrayType, FormlyFieldConfig, FormlyModule } from "@ngx-formly/core";
+import { MODELS_INPUT_TYPE } from "../../service/code-editor/ui-udf-parameters-parser.service";
 
 type UiUdfParameterColumn = Readonly<{ label: string; key: string; parentKey?: string; disabled: boolean }>;
+
+const VALUE_COLUMN: UiUdfParameterColumn = { label: "Value", key: "value", disabled: false };
 
 /** Renders inferred Python UDF UI parameters with editable values and locked name/type columns. */
 @Component({
@@ -33,7 +36,7 @@ export class UiUdfParametersComponent extends FieldArrayType<FormlyFieldConfig> 
   private readonly disabledStateConfigured = new WeakMap<FormlyFieldConfig, boolean>();
 
   readonly fieldColumns: UiUdfParameterColumn[] = [
-    { label: "Value", key: "value", disabled: false },
+    VALUE_COLUMN,
     { label: "Name", key: "attributeName", parentKey: "attribute", disabled: true },
     { label: "Type", key: "attributeType", parentKey: "attribute", disabled: true },
   ];
@@ -59,6 +62,20 @@ export class UiUdfParametersComponent extends FieldArrayType<FormlyFieldConfig> 
 
   private configureRowFields(rowField: FormlyFieldConfig | undefined): void {
     this.configureRowColumns(rowField, this.configureDisabledState.bind(this));
+    this.configureValueEditor(rowField);
+  }
+
+  /**
+   * Swaps the Value cell for the model picker on a models parameter. The kind comes from the
+   * row's own data because it was inferred from the UDF's code, not chosen on the row.
+   */
+  private configureValueEditor(rowField: FormlyFieldConfig | undefined): void {
+    if (!rowField) return;
+    const valueField = this.getColumnField(rowField, VALUE_COLUMN);
+    if (!valueField) return;
+
+    const inputType = (rowField.model as { inputType?: string } | undefined)?.inputType;
+    if (inputType === MODELS_INPUT_TYPE) valueField.type = "modelvalue";
   }
 
   private configureRowColumns(

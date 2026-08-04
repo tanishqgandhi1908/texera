@@ -31,6 +31,7 @@ import { UntilDestroy, untilDestroyed } from "@ngneat/until-destroy";
 import { WorkflowActionService } from "../../service/workflow-graph/model/workflow-action.service";
 import { WorkflowVersionService } from "../../../dashboard/service/user/workflow-version/workflow-version.service";
 import type { Text as YText } from "yjs";
+import { UiUdfParametersSyncService } from "../../service/code-editor/ui-udf-parameters-sync.service";
 import { getWebsocketUrl } from "src/app/common/util/url";
 import { MonacoBinding } from "y-monaco";
 import { from, Subject, take } from "rxjs";
@@ -97,6 +98,7 @@ export class CodeEditorComponent implements AfterViewInit, SafeStyle, OnDestroy 
   @ViewChild(AnnotationSuggestionComponent) annotationSuggestion!: AnnotationSuggestionComponent;
   @ViewChild(BreakpointConditionInputComponent) breakpointConditionInput!: BreakpointConditionInputComponent;
   private code?: YText;
+  private detachUiParameterSync?: () => void;
   private workflowVersionStreamSubject: Subject<void> = new Subject<void>();
   public currentOperatorId!: string;
 
@@ -144,7 +146,8 @@ export class CodeEditorComponent implements AfterViewInit, SafeStyle, OnDestroy 
     private workflowVersionService: WorkflowVersionService,
     public coeditorPresenceService: CoeditorPresenceService,
     private aiAssistantService: AIAssistantService,
-    private config: GuiConfigService
+    private config: GuiConfigService,
+    private uiUdfParametersSyncService: UiUdfParametersSyncService
   ) {
     this.currentOperatorId = this.workflowActionService.getJointGraphWrapper().getCurrentHighlightedOperatorIDs()[0];
     const operatorType = this.workflowActionService.getTexeraGraph().getOperator(this.currentOperatorId).operatorType;
@@ -164,6 +167,10 @@ export class CodeEditorComponent implements AfterViewInit, SafeStyle, OnDestroy 
         .getSharedOperatorType(this.currentOperatorId)
         .get("operatorProperties") as YType<Readonly<{ [key: string]: any }>>
     ).get("code") as YText;
+
+    // Parameter rows are inferred from the code, so the panel has to follow the editor:
+    // declaring self.UiParameter(...) here should make its row appear over there.
+    this.detachUiParameterSync = this.uiUdfParametersSyncService.attachToYCode(this.currentOperatorId, this.code);
   }
 
   ngAfterViewInit() {
@@ -185,6 +192,8 @@ export class CodeEditorComponent implements AfterViewInit, SafeStyle, OnDestroy 
   }
 
   ngOnDestroy(): void {
+    this.detachUiParameterSync?.();
+    this.detachUiParameterSync = undefined;
     this.workflowActionService.getTexeraGraph().updateSharedModelAwareness("editingCode", false);
     localStorage.setItem(this.currentOperatorId, this.containerElement.nativeElement.style.cssText);
 

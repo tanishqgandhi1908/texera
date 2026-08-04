@@ -59,7 +59,6 @@ EXPECTED_CONFIG_KEYS = frozenset(
     {
         "workerId",
         "outputPort",
-        "mountedModels",
         "loggerLevel",
         "rPath",
         "icebergCatalogType",
@@ -148,7 +147,6 @@ def main(raw_config: str) -> None:
     # Hand the mounted-model variable bindings (a JSON object of
     # {variableName: localMountPath}) to ExecutorManager, which injects each one
     # into the UDF module as a module-level variable holding its local path.
-    os.environ["MOUNTED_MODELS"] = config["mountedModels"]
 
     PythonWorker(
         worker_id=config["workerId"],

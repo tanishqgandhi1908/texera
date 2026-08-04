@@ -84,15 +84,13 @@ object PythonWorkflowWorker {
       workerId: String,
       outputPort: String,
       rPath: String,
-      largeBinaryBaseUri: String,
-      mountedModels: String = "{}"
+      largeBinaryBaseUri: String
   ): Seq[(String, String)] = {
     val isPostgres = StorageConfig.icebergCatalogType == "postgres"
     val isRest = StorageConfig.icebergCatalogType == "rest"
     Seq(
       "workerId" -> workerId,
       "outputPort" -> outputPort,
-      "mountedModels" -> mountedModels,
       "loggerLevel" -> UdfConfig.pythonLogStreamHandlerLevel,
       "rPath" -> rPath,
       "icebergCatalogType" -> StorageConfig.icebergCatalogType,
@@ -253,16 +251,11 @@ class PythonWorkflowWorker(
 
     val pythonBin: String = choosePythonBin()
 
-    // Ensure every bound model is mounted and resolve each to its in-pod path, keyed by
-    // the Python variable it will be exposed as. Serialized as a JSON object of
-    // {variableName: mountPath} so the startup config stays an all-string map.
-    val mountedModels: String = {
-      val variableToPath = workerConfig.mountedModels.map {
-        case (variableName, locator) =>
-          variableName -> ModelMountManager.ensureMounted(locator).toString
-      }
-      objectMapper.writeValueAsString(variableToPath)
-    }
+    // Mount every model version this operator's UI parameters name, before the Python
+    // process starts. The paths themselves are already baked into the generated code by
+    // PythonUdfUiParameterSupport, so nothing is passed along here -- this is only about
+    // making sure the directories those paths point at exist.
+    workerConfig.mountedModels.values.foreach(ModelMountManager.ensureMounted)
 
     // Pass startup configuration to the Python worker by name, as a single JSON
     // object, rather than by argv position. This way the two sides agree by key,
@@ -272,8 +265,7 @@ class PythonWorkflowWorker(
       workerConfig.workerId.name,
       Integer.toString(pythonProxyServer.getPortNumber.get()),
       RENVPath,
-      workerConfig.largeBinaryBaseUri,
-      mountedModels
+      workerConfig.largeBinaryBaseUri
     )
 
     pythonServerProcess = Process(

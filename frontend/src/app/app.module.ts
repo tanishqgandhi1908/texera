@@ -166,6 +166,7 @@ import { NzTreeViewModule } from "ng-zorro-antd/tree-view";
 import { NzNoAnimationModule } from "ng-zorro-antd/core/animation";
 import { TreeModule } from "@ali-hm/angular-tree-component";
 import { UiUdfParametersComponent } from "./workspace/component/ui-udf-parameters/ui-udf-parameters.component";
+import { ModelValueSelectorComponent } from "./workspace/component/model-value-selector/model-value-selector.component";
 import { ResultExportationComponent } from "./workspace/component/result-exportation/result-exportation.component";
 import { ReportGenerationService } from "./workspace/service/report-generation/report-generation.service";
 import { SearchBarComponent } from "./dashboard/component/user/search-bar/search-bar.component";
@@ -277,6 +278,7 @@ registerLocaleData(en);
     NzGridModule,
     ScrollingModule,
     UiUdfParametersComponent,
+    ModelValueSelectorComponent,
     AdminGmailComponent,
     PublicProjectComponent,
     WorkspaceComponent,

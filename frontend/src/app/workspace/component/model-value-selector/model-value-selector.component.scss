@@ -17,55 +17,17 @@
  * under the License.
  */
 
-.model-variables {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.model-variables-hint {
-  color: rgba(0, 0, 0, 0.45);
-  font-size: 12px;
-}
-
-.model-variable-row {
+.model-value-select {
+  // The path can be long; keep it on one line and let the tooltip carry the rest.
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.model-variable-name {
-  width: 30%;
-  min-width: 80px;
-  font-family: monospace;
-}
-
-.model-variable-arrow {
-  color: rgba(0, 0, 0, 0.45);
-}
-
-.model-variable-select {
-  flex: 1;
-  min-width: 0;
-  // The button carries a path that can be long; keep it on one line and let the
-  // tooltip show the whole thing rather than letting the row grow.
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  width: 100%;
   overflow: hidden;
 }
 
-.model-variable-label {
+.model-value-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.model-variable-remove {
-  color: #ff4d4f;
-  cursor: pointer;
-}
-
-.model-variables-add {
-  align-self: flex-start;
 }
