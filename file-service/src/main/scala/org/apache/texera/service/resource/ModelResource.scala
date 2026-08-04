@@ -87,11 +87,22 @@ object ModelResource {
   // MVP supports a single framework; stored on the model so later frameworks can be added.
   private val DEFAULT_FRAMEWORK = "pytorch"
 
-  // Recognised values for the `framework` and `format` labels.
-  val SUPPORTED_FRAMEWORKS: Set[String] = Set("pytorch", "tensorflow", "onnx", "sklearn")
+  // Recognised values for the `framework` and `format` labels. "other" covers
+  // anything outside the known set so a model is never blocked from uploading.
+  val SUPPORTED_FRAMEWORKS: Set[String] =
+    Set("pytorch", "tensorflow", "onnx", "sklearn", "other")
 
   val SUPPORTED_FORMATS: Set[String] =
-    Set("torchscript", "state-dict", "safetensors", "onnx", "savedmodel", "joblib", "pickle")
+    Set(
+      "torchscript",
+      "state-dict",
+      "safetensors",
+      "onnx",
+      "savedmodel",
+      "joblib",
+      "pickle",
+      "other"
+    )
 
   private def context =
     SqlServer
@@ -158,6 +169,10 @@ object ModelResource {
   case class ModelDescriptionModification(mid: Integer, description: String)
 
   case class ModelNameModification(mid: Integer, name: String)
+
+  case class ModelFrameworkModification(mid: Integer, framework: String)
+
+  case class ModelFormatModification(mid: Integer, format: String)
 
   case class DashboardModelVersion(
       modelVersion: ModelVersion,
@@ -415,6 +430,56 @@ class ModelResource extends LazyLogging {
       }
 
       model.setDescription(modificator.description)
+      modelDao.update(model)
+      Response.ok().build()
+    }
+  }
+
+  @POST
+  @Consumes(Array(MediaType.APPLICATION_JSON))
+  @Produces(Array(MediaType.APPLICATION_JSON))
+  @RolesAllowed(Array("REGULAR", "ADMIN"))
+  @Path("/update/framework")
+  def updateModelFramework(
+      modificator: ModelFrameworkModification,
+      @Auth sessionUser: SessionUser
+  ): Response = {
+    withTransaction(context) { ctx =>
+      val uid = sessionUser.getUid
+      val modelDao = new ModelDao(ctx.configuration())
+      val model = getModelByID(ctx, modificator.mid)
+      if (!userHasWriteAccess(ctx, modificator.mid, uid)) {
+        throw new ForbiddenException(ERR_USER_HAS_NO_ACCESS_TO_MODEL_MESSAGE)
+      }
+
+      validateLabel("framework", modificator.framework, SUPPORTED_FRAMEWORKS)
+
+      model.setFramework(modificator.framework)
+      modelDao.update(model)
+      Response.ok().build()
+    }
+  }
+
+  @POST
+  @Consumes(Array(MediaType.APPLICATION_JSON))
+  @Produces(Array(MediaType.APPLICATION_JSON))
+  @RolesAllowed(Array("REGULAR", "ADMIN"))
+  @Path("/update/format")
+  def updateModelFormat(
+      modificator: ModelFormatModification,
+      @Auth sessionUser: SessionUser
+  ): Response = {
+    withTransaction(context) { ctx =>
+      val uid = sessionUser.getUid
+      val modelDao = new ModelDao(ctx.configuration())
+      val model = getModelByID(ctx, modificator.mid)
+      if (!userHasWriteAccess(ctx, modificator.mid, uid)) {
+        throw new ForbiddenException(ERR_USER_HAS_NO_ACCESS_TO_MODEL_MESSAGE)
+      }
+
+      validateLabel("format", modificator.format, SUPPORTED_FORMATS)
+
+      model.setFormat(modificator.format)
       modelDao.update(model)
       Response.ok().build()
     }

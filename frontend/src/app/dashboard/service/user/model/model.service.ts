@@ -49,7 +49,7 @@ export const DEFAULT_MODEL_NAME = "Untitled-model";
 export const MODEL_NAME_MAX_LENGTH = 128;
 const MODEL_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 
-export const MODEL_FRAMEWORKS = ["pytorch", "tensorflow", "onnx", "sklearn"] as const;
+export const MODEL_FRAMEWORKS = ["pytorch", "tensorflow", "onnx", "sklearn", "other"] as const;
 export const MODEL_FORMATS = [
   "torchscript",
   "state-dict",
@@ -58,6 +58,7 @@ export const MODEL_FORMATS = [
   "savedmodel",
   "joblib",
   "pickle",
+  "other",
 ] as const;
 
 export function validateModelName(name: string): string | null {
