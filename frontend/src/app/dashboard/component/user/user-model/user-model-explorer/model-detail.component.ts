@@ -17,7 +17,7 @@
  */
 
 import { Component, EventEmitter, OnInit, Output, ViewChild } from "@angular/core";
-import { ActivatedRoute } from "@angular/router";
+import { ActivatedRoute, Router } from "@angular/router";
 import { UntilDestroy, untilDestroyed } from "@ngneat/until-destroy";
 import { switchMap } from "rxjs/operators";
 import { Subscription } from "rxjs";
@@ -31,7 +31,6 @@ import { NzTagComponent } from "ng-zorro-antd/tag";
 import { ɵNzTransitionPatchDirective } from "ng-zorro-antd/core/transition-patch";
 import { NzIconDirective } from "ng-zorro-antd/icon";
 import { NzButtonComponent } from "ng-zorro-antd/button";
-import { NzPopoverDirective } from "ng-zorro-antd/popover";
 import { NzSwitchComponent } from "ng-zorro-antd/switch";
 import { FormsModule } from "@angular/forms";
 import { NzLayoutComponent, NzContentComponent, NzSiderComponent } from "ng-zorro-antd/layout";
@@ -42,12 +41,28 @@ import { NzSelectComponent, NzOptionComponent } from "ng-zorro-antd/select";
 import { NzProgressComponent } from "ng-zorro-antd/progress";
 import { NzInputDirective } from "ng-zorro-antd/input";
 import { NzDividerComponent } from "ng-zorro-antd/divider";
+import { NzTabsModule } from "ng-zorro-antd/tabs";
+import { NzPopconfirmDirective } from "ng-zorro-antd/popconfirm";
 import { CdkFixedSizeVirtualScroll, CdkVirtualForOf, CdkVirtualScrollViewport } from "@angular/cdk/scrolling";
 
 import { ActionType, EntityType, HubService } from "../../../../../hub/service/hub.service";
 import { isDefined } from "../../../../../common/util/predicate";
 import { formatCount } from "../../../../../common/util/format.util";
-import { ModelService } from "../../../../service/user/model/model.service";
+import {
+  MODEL_FORMATS,
+  MODEL_FRAMEWORKS,
+  ModelService,
+  validateModelName,
+} from "../../../../service/user/model/model.service";
+import { USER_MODEL } from "../../../../../app-routing.constant";
+import {
+  buildModelUsageSnippet,
+  hasKnownLoader,
+  modelVariableName,
+  SnippetToken,
+  tokenizeSnippet,
+} from "./model-usage-snippet";
+import { extractErrorMessage } from "../../../../../common/util/error";
 import { DownloadService } from "../../../../service/user/download/download.service";
 import { NotificationService } from "../../../../../common/service/notification/notification.service";
 import { UserService } from "../../../../../common/service/user/user.service";
@@ -88,7 +103,6 @@ export const ABORT_RETRY_BACKOFF_BASE_MS = 100;
     ɵNzTransitionPatchDirective,
     NzIconDirective,
     NzButtonComponent,
-    NzPopoverDirective,
     NzSwitchComponent,
     FormsModule,
     MarkdownDescriptionComponent,
@@ -110,6 +124,8 @@ export const ABORT_RETRY_BACKOFF_BASE_MS = 100;
     NzProgressComponent,
     NzInputDirective,
     NzDividerComponent,
+    NzTabsModule,
+    NzPopconfirmDirective,
     CdkVirtualScrollViewport,
     CdkFixedSizeVirtualScroll,
     CdkVirtualForOf,
@@ -131,6 +147,12 @@ export class ModelDetailComponent implements OnInit {
 
   // Relative to the version root, e.g. "weights/model.pt" — see loadFileContent.
   public currentDisplayedFileName: string = "";
+  public editedModelName: string = "";
+  public latestVersionCreationTime: string = "";
+  public latestVersionFileName: string = "";
+  public latestVersionSize: number | undefined;
+  public readonly frameworks = MODEL_FRAMEWORKS;
+  public readonly formats = MODEL_FORMATS;
   public currentFileSize: number | undefined;
   public currentModelVersionSize: number | undefined;
 
@@ -192,7 +214,8 @@ export class ModelDetailComponent implements OnInit {
     private downloadService: DownloadService,
     private userService: UserService,
     private adminSettingsService: AdminSettingsService,
-    private hubService: HubService
+    private hubService: HubService,
+    private router: Router
   ) {
     this.userService
       .userChanged()
@@ -240,6 +263,7 @@ export class ModelDetailComponent implements OnInit {
         .subscribe(dashboardModel => {
           const model = dashboardModel.model;
           this.modelName = model.name;
+          this.editedModelName = model.name;
           this.modelDescription = model.description;
           this.userModelAccessLevel = dashboardModel.accessPrivilege;
           this.modelIsPublic = model.isPublic;
@@ -267,6 +291,126 @@ export class ModelDetailComponent implements OnInit {
           }
         });
     }
+  }
+
+  /** The file the Usage snippet targets: the open file, else the version's first file. */
+  private get snippetFileRelativePath(): string {
+    const versionPrefix = `/models/${this.ownerEmail}/${this.modelName}/${this.selectedVersion?.name ?? ""}/`;
+    if (this.currentDisplayedFileName.startsWith(versionPrefix)) {
+      return this.currentDisplayedFileName.slice(versionPrefix.length);
+    }
+    return this.latestVersionFileName.startsWith(versionPrefix)
+      ? this.latestVersionFileName.slice(versionPrefix.length)
+      : "model-file";
+  }
+
+  get usageSnippet(): string {
+    return buildModelUsageSnippet({
+      modelName: this.modelName,
+      fileRelativePath: this.snippetFileRelativePath,
+      framework: this.modelFramework,
+      format: this.modelFormat,
+    });
+  }
+
+  /** The snippet split into coloured tokens, one array per line. */
+  get usageSnippetLines(): SnippetToken[][] {
+    return tokenizeSnippet(this.usageSnippet);
+  }
+
+  get modelVariable(): string {
+    return modelVariableName(this.modelName);
+  }
+
+  get snippetIsTailored(): boolean {
+    return hasKnownLoader(this.modelFramework, this.modelFormat);
+  }
+
+  async copyUsageSnippet(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(this.usageSnippet);
+      this.notificationService.success("Snippet copied to clipboard");
+    } catch {
+      this.notificationService.error("Failed to copy the snippet");
+    }
+  }
+
+  onSaveModelName(): void {
+    if (!this.mid) {
+      return;
+    }
+    const name = this.editedModelName;
+    const nameError = validateModelName(name);
+    if (nameError) {
+      this.notificationService.error(nameError);
+      return;
+    }
+
+    this.modelService
+      .updateModelName(this.mid, name)
+      .pipe(untilDestroyed(this))
+      .subscribe({
+        next: () => {
+          this.modelName = name;
+          this.notificationService.success("Model name updated");
+        },
+        error: (err: unknown) => {
+          this.editedModelName = this.modelName;
+          this.notificationService.error(extractErrorMessage(err));
+        },
+      });
+  }
+
+  onFrameworkChange(framework: string): void {
+    if (!this.mid || framework === this.modelFramework) {
+      return;
+    }
+    const previous = this.modelFramework;
+    this.modelFramework = framework;
+    this.modelService
+      .updateModelFramework(this.mid, framework)
+      .pipe(untilDestroyed(this))
+      .subscribe({
+        next: () => this.notificationService.success("Framework updated"),
+        error: (err: unknown) => {
+          this.modelFramework = previous;
+          this.notificationService.error(extractErrorMessage(err));
+        },
+      });
+  }
+
+  onFormatChange(format: string): void {
+    if (!this.mid || format === this.modelFormat) {
+      return;
+    }
+    const previous = this.modelFormat;
+    this.modelFormat = format;
+    this.modelService
+      .updateModelFormat(this.mid, format)
+      .pipe(untilDestroyed(this))
+      .subscribe({
+        next: () => this.notificationService.success("Format updated"),
+        error: (err: unknown) => {
+          this.modelFormat = previous;
+          this.notificationService.error(extractErrorMessage(err));
+        },
+      });
+  }
+
+  onDeleteModel(): void {
+    if (!this.mid) {
+      return;
+    }
+    this.modelService
+      .deleteModel(this.mid)
+      .pipe(untilDestroyed(this))
+      .subscribe({
+        next: () => {
+          this.notificationService.success(`Model ${this.modelName} was deleted`);
+          this.router.navigate([USER_MODEL]);
+        },
+        error: (err: unknown) => this.notificationService.error(extractErrorMessage(err)),
+      });
   }
 
   /** Records a view and loads the like count / liked state, mirroring the dataset page. */
@@ -365,7 +509,12 @@ export class ModelDetailComponent implements OnInit {
           this.versions = versions;
           // The backend orders newest first, so the head is the latest version.
           if (this.versions.length > 0) {
-            this.selectedVersion = this.versions[0];
+            const latest = this.versions[0];
+            this.latestVersionCreationTime =
+              typeof latest.creationTime === "number"
+                ? format(new Date(latest.creationTime), "MM/dd/yyyy HH:mm:ss")
+                : "";
+            this.selectedVersion = latest;
             this.onVersionSelected(this.selectedVersion);
           }
         });
@@ -392,6 +541,10 @@ export class ModelDetailComponent implements OnInit {
           let currentNode = this.fileTreeNodeList[0];
           while (currentNode.type === "directory" && currentNode.children && currentNode.children.length > 0) {
             currentNode = currentNode.children[0];
+          }
+          if (version === this.versions[0]) {
+            this.latestVersionFileName = getFullPathFromDatasetFileNode(currentNode);
+            this.latestVersionSize = data.size;
           }
           this.loadFileContent(currentNode);
         });
@@ -520,14 +673,14 @@ export class ModelDetailComponent implements OnInit {
   // queue (`activeUploads < NaN` is always false).
   private loadUploadSettings(): void {
     const settings: Array<[string, (value: number) => void]> = [
-      ["multipart_upload_chunk_size_mib", value => (this.chunkSizeMiB = value)],
-      ["max_number_of_concurrent_uploading_file_chunks", value => (this.maxConcurrentChunks = value)],
-      ["max_number_of_concurrent_uploading_file", value => (this.maxConcurrentFiles = value)],
+      ["model_multipart_upload_chunk_size_mib", value => (this.chunkSizeMiB = value)],
+      ["model_max_number_of_concurrent_uploading_file_chunks", value => (this.maxConcurrentChunks = value)],
+      ["model_max_number_of_concurrent_uploading_file", value => (this.maxConcurrentFiles = value)],
     ];
     const current: Record<string, number> = {
-      multipart_upload_chunk_size_mib: this.chunkSizeMiB,
-      max_number_of_concurrent_uploading_file_chunks: this.maxConcurrentChunks,
-      max_number_of_concurrent_uploading_file: this.maxConcurrentFiles,
+      model_multipart_upload_chunk_size_mib: this.chunkSizeMiB,
+      model_max_number_of_concurrent_uploading_file_chunks: this.maxConcurrentChunks,
+      model_max_number_of_concurrent_uploading_file: this.maxConcurrentFiles,
     };
     settings.forEach(([key, assign]) => {
       this.adminSettingsService

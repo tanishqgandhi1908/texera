@@ -324,7 +324,7 @@ describe("framework and format options", () => {
   // These must match ModelResource.SUPPORTED_FRAMEWORKS / SUPPORTED_FORMATS, which reject
   // anything else with a 400. A drift here becomes a failed create at runtime.
   it("matches the backend whitelists", () => {
-    expect([...MODEL_FRAMEWORKS]).toEqual(["pytorch", "tensorflow", "onnx", "sklearn"]);
+    expect([...MODEL_FRAMEWORKS]).toEqual(["pytorch", "tensorflow", "onnx", "sklearn", "other"]);
     expect([...MODEL_FORMATS]).toEqual([
       "torchscript",
       "state-dict",
@@ -333,6 +333,7 @@ describe("framework and format options", () => {
       "savedmodel",
       "joblib",
       "pickle",
+      "other",
     ]);
   });
 });

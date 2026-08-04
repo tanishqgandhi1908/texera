@@ -29,6 +29,7 @@ import org.apache.texera.dao.jooq.generated.tables.daos.UserDao
 import org.apache.texera.dao.jooq.generated.tables.pojos.User
 import org.apache.texera.service.MockLakeFS
 import org.apache.texera.service.`type`.{ExistingUploadFile, ExistingUploadFilesRequest}
+import org.jooq.impl.DSL
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach}
@@ -293,6 +294,67 @@ class ModelUploadResourceSpec
   // ===========================================================================
   // Session-based multipart upload (single part)
   // ===========================================================================
+  // ---------- site_settings helpers (max upload size) ----------
+  private val ModelMaxUploadKey = "model_single_file_upload_max_size_mib"
+  private val DatasetMaxUploadKey = "single_file_upload_max_size_mib"
+
+  private def upsertSiteSetting(key: String, value: String): Unit = {
+    val table = DSL.table(DSL.name("texera_db", "site_settings"))
+    val keyField = DSL.field(DSL.name("key"), classOf[String])
+    val valField = DSL.field(DSL.name("value"), classOf[String])
+    val ctx = getDSLContext
+    ctx.deleteFrom(table).where(keyField.eq(key)).execute()
+    ctx.insertInto(table).columns(keyField, valField).values(key, value).execute()
+  }
+
+  private def deleteSiteSetting(key: String): Unit = {
+    val table = DSL.table(DSL.name("texera_db", "site_settings"))
+    val keyField = DSL.field(DSL.name("key"), classOf[String])
+    getDSLContext.deleteFrom(table).where(keyField.eq(key)).execute()
+  }
+
+  private def initUpload(modelName: String, filePath: String, sizeBytes: Long): Response =
+    modelResource.multipartUpload(
+      "init",
+      ownerUser.getEmail,
+      modelName,
+      urlEnc(filePath),
+      Optional.of(java.lang.Long.valueOf(sizeBytes)),
+      Optional.of(java.lang.Long.valueOf(sizeBytes)),
+      Optional.empty(),
+      sessionUser
+    )
+
+  "the model upload limit" should "be read from the model key, not the dataset key" in {
+    val model = newModel()
+    val oneMiB = 1024L * 1024L
+    // A dataset limit far below the payload must not constrain a model upload.
+    upsertSiteSetting(DatasetMaxUploadKey, "1")
+    upsertSiteSetting(ModelMaxUploadKey, "8")
+    try {
+      initUpload(model.model.getName, "under-model-limit.pt", 4L * oneMiB).getStatus shouldEqual 200
+    } finally {
+      deleteSiteSetting(DatasetMaxUploadKey)
+      deleteSiteSetting(ModelMaxUploadKey)
+    }
+  }
+
+  it should "reject a file above the model limit at the boundary" in {
+    val model = newModel()
+    val oneMiB = 1024L * 1024L
+    upsertSiteSetting(ModelMaxUploadKey, "2")
+    try {
+      // exactly at the limit is allowed
+      initUpload(model.model.getName, "at-model-limit.pt", 2L * oneMiB).getStatus shouldEqual 200
+      // one byte over is rejected
+      intercept[BadRequestException] {
+        initUpload(model.model.getName, "over-model-limit.pt", 2L * oneMiB + 1L)
+      }
+    } finally {
+      deleteSiteSetting(ModelMaxUploadKey)
+    }
+  }
+
   "the multipart flow" should "init, upload a part, finish, and be committable as a version" in {
     val model = newModel()
     val mid = model.model.getMid

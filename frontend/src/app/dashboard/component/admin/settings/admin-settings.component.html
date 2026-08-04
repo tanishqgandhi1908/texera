@@ -252,9 +252,9 @@
   </div>
 </nz-card>
 
-<nz-card [nzTitle]="datasetTitle">
-  <ng-template #datasetTitle>
-    Dataset
+<nz-card [nzTitle]="uploadTitle">
+  <ng-template #uploadTitle>
+    Upload
     <span
       nz-tooltip
       [nzTooltipTitle]="awsTip"
@@ -284,6 +284,8 @@
       </a>
     </div>
   </ng-template>
+
+  <h4 class="settings-subheading">Datasets</h4>
 
   <div class="settings-row">
     <span>Concurrent Files:</span>
@@ -347,6 +349,72 @@
     MiB (5 GiB). Minimum required for current configuration: {{ requiredMinPartSizeMiB | number }} MiB.
     <br />
     In-flight data per file: ~{{ maxConcurrentChunks * chunkSizeMiB | number }} MiB
+  </div>
+
+  <h4 class="settings-subheading">Models</h4>
+
+  <div class="settings-row">
+    <span>Concurrent Files:</span>
+    <nz-input-number
+      [(ngModel)]="modelMaxConcurrentFiles"
+      [nzMin]="1"
+      [nzMax]="1000"
+      [nzStep]="1"
+      [nzPrecision]="0">
+    </nz-input-number>
+  </div>
+  <div class="help-text-number">Number of files that can be uploaded simultaneously. (Range: 1 - 1000)</div>
+
+  <div class="settings-row">
+    <span>File Size:</span>
+    <div class="input-with-unit">
+      <nz-input-number
+        [(ngModel)]="modelMaxFileSizeMiB"
+        [nzMin]="1"
+        [nzMax]="MAX_FILE_SIZE_MiB"
+        [nzStep]="10"
+        [nzPrecision]="0">
+      </nz-input-number>
+      <span class="unit">MiB</span>
+    </div>
+  </div>
+  <div class="help-text-number">
+    Maximum size allowed for individual file uploads. Range: 1 MiB - {{ MAX_FILE_SIZE_MiB | number }} MiB (5 TiB).
+  </div>
+
+  <div class="settings-row">
+    <span>Concurrent Parts:</span>
+    <nz-input-number
+      [(ngModel)]="modelMaxConcurrentChunks"
+      [nzMin]="1"
+      [nzMax]="MAX_TOTAL_PARTS"
+      [nzStep]="1"
+      [nzPrecision]="0">
+    </nz-input-number>
+  </div>
+  <div class="help-text-number">
+    Number of parts uploaded in parallel. Current configuration will use approximately {{ modelPartsAtMax | number }}
+    parts for maximum file size.
+  </div>
+
+  <div class="settings-row">
+    <span>Part Size:</span>
+    <div class="input-with-unit">
+      <nz-input-number
+        [(ngModel)]="modelChunkSizeMiB"
+        [nzMin]="MIN_PART_SIZE_MiB"
+        [nzMax]="MAX_PART_SIZE_MiB"
+        [nzStep]="10"
+        [nzPrecision]="0">
+      </nz-input-number>
+      <span class="unit">MiB</span>
+    </div>
+  </div>
+  <div class="help-text-number">
+    Size of each chunk during multipart upload. Minimum required for current configuration: {{
+    modelRequiredMinPartSizeMiB | number }} MiB.
+    <br />
+    In-flight data per file: ~{{ modelMaxConcurrentChunks * modelChunkSizeMiB | number }} MiB
   </div>
 
   <div class="button-row">

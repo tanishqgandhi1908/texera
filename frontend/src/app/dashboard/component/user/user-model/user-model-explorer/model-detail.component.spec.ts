@@ -17,7 +17,8 @@
  */
 
 import { ComponentFixture, TestBed } from "@angular/core/testing";
-import { ActivatedRoute } from "@angular/router";
+import { ActivatedRoute, Router } from "@angular/router";
+import { USER_MODEL } from "src/app/app-routing.constant";
 import { MarkdownService } from "ngx-markdown";
 import { NzModalService } from "ng-zorro-antd/modal";
 import { HttpErrorResponse } from "@angular/common/http";
@@ -95,6 +96,10 @@ describe("ModelDetailComponent", () => {
     updateModelPublicity: ReturnType<typeof vi.fn>;
     updateModelDownloadable: ReturnType<typeof vi.fn>;
     updateModelDescription: ReturnType<typeof vi.fn>;
+    updateModelName: ReturnType<typeof vi.fn>;
+    updateModelFramework: ReturnType<typeof vi.fn>;
+    updateModelFormat: ReturnType<typeof vi.fn>;
+    deleteModel: ReturnType<typeof vi.fn>;
     getModelDiff: ReturnType<typeof vi.fn>;
     resetModelFileDiff: ReturnType<typeof vi.fn>;
     deleteModelFile: ReturnType<typeof vi.fn>;
@@ -109,6 +114,7 @@ describe("ModelDetailComponent", () => {
     downloadModelSingleFile: ReturnType<typeof vi.fn>;
   };
   let notificationService: { success: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
+  let routerStub: { navigate: ReturnType<typeof vi.fn> };
   let hubService: {
     getCounts: ReturnType<typeof vi.fn>;
     postView: ReturnType<typeof vi.fn>;
@@ -125,6 +131,10 @@ describe("ModelDetailComponent", () => {
       updateModelPublicity: vi.fn().mockReturnValue(of({})),
       updateModelDownloadable: vi.fn().mockReturnValue(of({})),
       updateModelDescription: vi.fn().mockReturnValue(of({})),
+      updateModelName: vi.fn().mockReturnValue(of({})),
+      updateModelFramework: vi.fn().mockReturnValue(of({})),
+      updateModelFormat: vi.fn().mockReturnValue(of({})),
+      deleteModel: vi.fn().mockReturnValue(of({})),
       getModelDiff: vi.fn().mockReturnValue(of([])),
       resetModelFileDiff: vi.fn().mockReturnValue(of({})),
       deleteModelFile: vi.fn().mockReturnValue(of({})),
@@ -139,6 +149,7 @@ describe("ModelDetailComponent", () => {
       downloadModelSingleFile: vi.fn().mockReturnValue(of(new Blob())),
     };
     notificationService = { success: vi.fn(), error: vi.fn() };
+    routerStub = { navigate: vi.fn().mockResolvedValue(true) };
     hubService = {
       getCounts: vi.fn().mockReturnValue(of([{ counts: { like: 4 } }])),
       postView: vi.fn().mockReturnValue(of(7)),
@@ -156,6 +167,7 @@ describe("ModelDetailComponent", () => {
         { provide: HubService, useValue: hubService },
         { provide: UserService, useClass: StubUserService },
         { provide: ActivatedRoute, useValue: { params: of({ mid: "5" }), data: of({}) } },
+        { provide: Router, useValue: routerStub },
         { provide: MarkdownService, useValue: { parse: vi.fn(() => "") } },
         { provide: NzModalService, useValue: { create: vi.fn() } },
         { provide: AdminSettingsService, useValue: { getPublicSetting: vi.fn().mockReturnValue(of("20")) } },
@@ -647,6 +659,145 @@ describe("ModelDetailComponent", () => {
 
       expect(component.isLiked).toBe(true);
       expect(component.likeCount).toBe(before);
+    });
+  });
+
+  describe("upload settings", () => {
+    it("reads the model-specific upload keys, not the dataset ones", () => {
+      const settingsService = TestBed.inject(AdminSettingsService) as unknown as {
+        getPublicSetting: ReturnType<typeof vi.fn>;
+      };
+      fixture.detectChanges();
+
+      const requested = settingsService.getPublicSetting.mock.calls.map((c: unknown[]) => c[0]);
+      expect(requested).toEqual(
+        expect.arrayContaining([
+          "model_multipart_upload_chunk_size_mib",
+          "model_max_number_of_concurrent_uploading_file_chunks",
+          "model_max_number_of_concurrent_uploading_file",
+        ])
+      );
+      expect(requested).not.toContain("multipart_upload_chunk_size_mib");
+      expect(requested).not.toContain("max_number_of_concurrent_uploading_file");
+    });
+  });
+
+  describe("settings tab", () => {
+    it("saves a valid model name and reflects it in the header", () => {
+      modelService.updateModelName.mockReturnValue(of({}));
+      fixture.detectChanges();
+      component.editedModelName = "renamed_model";
+
+      component.onSaveModelName();
+
+      expect(modelService.updateModelName).toHaveBeenCalledWith(5, "renamed_model");
+      expect(component.modelName).toBe("renamed_model");
+    });
+
+    it("rejects an invalid name without calling the backend", () => {
+      fixture.detectChanges();
+      component.editedModelName = "bad name!";
+
+      component.onSaveModelName();
+
+      expect(modelService.updateModelName).not.toHaveBeenCalled();
+      expect(notificationService.error).toHaveBeenCalled();
+    });
+
+    it("reverts the edited name when the save fails", () => {
+      modelService.updateModelName.mockReturnValue(throwError(() => new Error("boom")));
+      fixture.detectChanges();
+      const original = component.modelName;
+      component.editedModelName = "another_name";
+
+      component.onSaveModelName();
+
+      expect(component.editedModelName).toBe(original);
+      expect(notificationService.error).toHaveBeenCalled();
+    });
+
+    it("persists a framework change optimistically", () => {
+      modelService.updateModelFramework.mockReturnValue(of({}));
+      fixture.detectChanges();
+
+      component.onFrameworkChange("onnx");
+
+      expect(modelService.updateModelFramework).toHaveBeenCalledWith(5, "onnx");
+      expect(component.modelFramework).toBe("onnx");
+    });
+
+    it("rolls the framework back when the update fails", () => {
+      fixture.detectChanges();
+      const previous = component.modelFramework;
+      modelService.updateModelFramework.mockReturnValue(throwError(() => new Error("nope")));
+
+      component.onFrameworkChange("sklearn");
+
+      expect(component.modelFramework).toBe(previous);
+      expect(notificationService.error).toHaveBeenCalled();
+    });
+
+    it("does not call the backend when the framework is unchanged", () => {
+      fixture.detectChanges();
+      component.modelFramework = "pytorch";
+
+      component.onFrameworkChange("pytorch");
+
+      expect(modelService.updateModelFramework).not.toHaveBeenCalled();
+    });
+
+    it("persists a format change and rolls back on failure", () => {
+      modelService.updateModelFormat.mockReturnValue(of({}));
+      fixture.detectChanges();
+
+      component.onFormatChange("onnx");
+      expect(modelService.updateModelFormat).toHaveBeenCalledWith(5, "onnx");
+      expect(component.modelFormat).toBe("onnx");
+
+      modelService.updateModelFormat.mockReturnValue(throwError(() => new Error("nope")));
+      component.onFormatChange("joblib");
+      expect(component.modelFormat).toBe("onnx");
+    });
+
+    it("navigates to the models list after deleting", () => {
+      modelService.deleteModel.mockReturnValue(of({}));
+      fixture.detectChanges();
+
+      component.onDeleteModel();
+
+      expect(modelService.deleteModel).toHaveBeenCalledWith(5);
+      expect(routerStub.navigate).toHaveBeenCalledWith([USER_MODEL]);
+    });
+  });
+
+  describe("usage tab", () => {
+    it("generates a snippet that reads the model through the property-panel variable", () => {
+      fixture.detectChanges();
+
+      expect(component.modelVariable).toBe("resnet");
+      expect(component.usageSnippet).toContain("os.path.join(resnet,");
+      expect(component.usageSnippet).toContain("class ProcessTupleOperator(UDFOperatorV2):");
+      // the mount replaces logical-path resolution entirely
+      expect(component.usageSnippet).not.toContain("/models/");
+    });
+
+    it("exposes the snippet as coloured tokens without losing text", () => {
+      fixture.detectChanges();
+
+      const rebuilt = component.usageSnippetLines.map(l => l.map(t => t.text).join("")).join("\n");
+      expect(rebuilt).toBe(component.usageSnippet);
+      expect(component.usageSnippetLines.some(l => l.some(t => t.kind === "keyword"))).toBe(true);
+      expect(component.usageSnippetLines.some(l => l.some(t => t.kind === "comment"))).toBe(true);
+    });
+
+    it("reports whether the framework/format pair has a tailored loader", () => {
+      fixture.detectChanges();
+      component.modelFramework = "sklearn";
+      component.modelFormat = "joblib";
+      expect(component.snippetIsTailored).toBe(true);
+
+      component.modelFormat = "other";
+      expect(component.snippetIsTailored).toBe(false);
     });
   });
 });
