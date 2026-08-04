@@ -38,3 +38,6 @@ export * from "./graph/workflow-state";
 export * from "./graph/auto-layout";
 export * from "./graph/workflow-utils";
 export * from "./graph/workflow-system-metadata";
+
+export * from "./collab/y-object";
+export * from "./collab/shared-workflow-session";

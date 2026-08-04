@@ -42,12 +42,21 @@ export class UserAvatarComponent implements OnChanges {
   @Input() userName?: string;
   @Input() userColor?: string;
   @Input() isOwner: Boolean = false;
+  /**
+   * A ready-to-use image URL, for participants with no Texera account to draw
+   * an avatar from — today that means MCP clients, which send their own logo
+   * through shared-editing awareness. Takes precedence over `googleAvatar`,
+   * and is filtered to image schemes because it arrives from outside.
+   */
+  @Input() avatarUrl?: string;
   avatarUrl$: Observable<string | undefined> = of(undefined);
 
   constructor(private userService: UserService) {}
 
   ngOnChanges(): void {
-    if (this.googleAvatar) {
+    if (this.avatarUrl) {
+      this.avatarUrl$ = of(sanitizeAvatarUrl(this.avatarUrl));
+    } else if (this.googleAvatar) {
       this.avatarUrl$ = this.userService.getAvatar(this.googleAvatar);
     } else {
       this.avatarUrl$ = of(undefined);
@@ -65,4 +74,15 @@ export class UserAvatarComponent implements OnChanges {
       return userName.slice(0, 5);
     }
   }
+}
+
+/**
+ * Keeps an externally supplied avatar to schemes that can only ever produce an
+ * image. Anything else falls back to the initials rather than being rendered.
+ */
+export function sanitizeAvatarUrl(url: string): string | undefined {
+  const trimmed = url.trim();
+  const isInlineImage = /^data:image\/(png|jpeg|gif|webp|svg\+xml);/i.test(trimmed);
+  const isRemoteImage = /^https?:\/\//i.test(trimmed);
+  return isInlineImage || isRemoteImage ? trimmed : undefined;
 }

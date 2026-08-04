@@ -17,7 +17,7 @@
  * under the License.
  */
 
-import { WorkflowState, type Workflow } from "@texera/sdk";
+import { WorkflowState, type SharedWorkflowSession, type Workflow } from "@texera/sdk";
 import { ToolError } from "./errors";
 
 /**
@@ -29,6 +29,11 @@ import { ToolError } from "./errors";
  * so if that timestamp moved while the session was open, someone else (or the
  * user's own open tab) has written since — and a blind save would discard their
  * work.
+ *
+ * When `live` is present the session is also joined to the workflow's
+ * shared-editing room, and every mutation is mirrored there so the user watches
+ * it happen. The in-memory `state` stays authoritative for this client either
+ * way, so the editing tools behave identically with or without a room.
  */
 export interface EditSession {
   wid: number;
@@ -41,6 +46,8 @@ export interface EditSession {
   /** True once any mutating tool has touched `state`. */
   dirty: boolean;
   openedAt: number;
+  /** The shared-editing room, when live co-editing is on and the join succeeded. */
+  live?: SharedWorkflowSession;
 }
 
 export class EditSessionStore {
@@ -48,7 +55,7 @@ export class EditSessionStore {
   /** The workflow the edit tools act on when no `wid` is given. */
   private activeWid?: number;
 
-  open(workflow: Workflow, readonly: boolean): EditSession {
+  open(workflow: Workflow, readonly: boolean, live?: SharedWorkflowSession): EditSession {
     const state = new WorkflowState();
     state.setWorkflowContent(workflow.content);
 
@@ -62,9 +69,16 @@ export class EditSessionStore {
       openedLastModifiedTime: workflow.lastModifiedTime,
       dirty: false,
       openedAt: Date.now(),
+      live,
     };
 
-    this.sessions.get(workflow.wid)?.state.destroy();
+    const previous = this.sessions.get(workflow.wid);
+    if (previous) {
+      previous.state.destroy();
+      // Re-opening replaces the room too, unless the caller handed the same one
+      // back — leaving the old connection would show two Claudes in the list.
+      if (previous.live && previous.live !== live) previous.live.destroy();
+    }
     this.sessions.set(workflow.wid, session);
     this.activeWid = workflow.wid;
     return session;
@@ -114,6 +128,7 @@ export class EditSessionStore {
     const session = this.sessions.get(wid);
     if (!session) return false;
     session.state.destroy();
+    session.live?.destroy();
     this.sessions.delete(wid);
     if (this.activeWid === wid) this.activeWid = undefined;
     return true;
@@ -123,4 +138,24 @@ export class EditSessionStore {
     session.dirty = false;
     session.openedLastModifiedTime = lastModifiedTime;
   }
+
+  /** Leaves every room, so the participant list does not keep a ghost. */
+  closeAll(): void {
+    for (const wid of [...this.sessions.keys()]) this.close(wid);
+  }
+}
+
+/**
+ * Records an edit: marks the session dirty and, when it is live, pushes the new
+ * graph into the shared-editing room and says what is being worked on.
+ *
+ * Pushing the whole graph rather than the individual change keeps this correct
+ * without a second mutation path — auto-layout moves operators the caller never
+ * named, so a per-mutation mirror would drift from `state` immediately.
+ */
+export function recordEdit(session: EditSession, activity: { editing?: string; highlighted?: string[] } = {}): void {
+  session.dirty = true;
+  if (!session.live?.connected) return;
+  session.live.replaceContent(session.state.getWorkflowContent());
+  session.live.publishPresence(activity);
 }

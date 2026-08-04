@@ -18,6 +18,7 @@
  */
 
 import { decodeJwtClaims, tokenExpiresAt, type TexeraJwtClaims } from "@texera/sdk";
+import { CLAUDE_AVATAR_DATA_URI, CLAUDE_PRESENCE_COLOR, DEFAULT_PRESENCE_NAME } from "./presence";
 
 /**
  * The MCP server is configured entirely from the environment, because that is
@@ -37,6 +38,27 @@ export interface McpConfig {
   /** Default wall-clock budget for `workflow_run`. */
   defaultRunTimeoutSeconds: number;
   requestTimeoutMs: number;
+  /**
+   * Join the workflow's shared-editing room on `workflow_open`, so edits appear
+   * on the user's canvas as they are made and this client shows up in the
+   * participant list. Disable to fall back to REST-only editing.
+   */
+  liveCoediting: boolean;
+  /** Identity this client presents to other participants. */
+  presence: {
+    name: string;
+    color: string;
+    /** `https:` or `data:image/…`; anything else is ignored by the workspace. */
+    avatarUrl?: string;
+  };
+  /**
+   * When set, `*_upload_local_file` may only read files under this directory.
+   * Unset means any readable path, which is the sensible default for a server
+   * the user runs on their own machine but not for a shared one.
+   */
+  localFileRoot?: string;
+  /** Part size for multipart uploads. */
+  multipartPartBytes: number;
 }
 
 export class ConfigError extends Error {
@@ -51,6 +73,9 @@ const DEFAULTS = {
   maxUploadBytes: 25 * 1024 * 1024,
   defaultRunTimeoutSeconds: 120,
   requestTimeoutMs: 60_000,
+  // 16 MiB: comfortably over S3's 5 MiB floor for non-final parts, and small
+  // enough that one retry after a dropped connection is cheap.
+  multipartPartBytes: 16 * 1024 * 1024,
 };
 
 function parsePositiveInt(raw: string | undefined, fallback: number, name: string): number {
@@ -60,6 +85,14 @@ function parsePositiveInt(raw: string | undefined, fallback: number, name: strin
     throw new ConfigError(`${name} must be a positive integer, got "${raw}"`);
   }
   return value;
+}
+
+function parseBoolean(raw: string | undefined, fallback: boolean, name: string): boolean {
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const value = raw.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(value)) return true;
+  if (["0", "false", "no", "off"].includes(value)) return false;
+  throw new ConfigError(`${name} must be true or false, got "${raw}"`);
 }
 
 /**
@@ -135,6 +168,18 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       env.TEXERA_REQUEST_TIMEOUT_MS,
       DEFAULTS.requestTimeoutMs,
       "TEXERA_REQUEST_TIMEOUT_MS"
+    ),
+    liveCoediting: parseBoolean(env.TEXERA_LIVE_COEDITING, true, "TEXERA_LIVE_COEDITING"),
+    presence: {
+      name: env.TEXERA_MCP_CLIENT_NAME?.trim() || DEFAULT_PRESENCE_NAME,
+      color: env.TEXERA_MCP_COLOR?.trim() || CLAUDE_PRESENCE_COLOR,
+      avatarUrl: env.TEXERA_MCP_AVATAR_URL?.trim() || CLAUDE_AVATAR_DATA_URI,
+    },
+    localFileRoot: env.TEXERA_LOCAL_FILE_ROOT?.trim() || undefined,
+    multipartPartBytes: parsePositiveInt(
+      env.TEXERA_MULTIPART_PART_BYTES,
+      DEFAULTS.multipartPartBytes,
+      "TEXERA_MULTIPART_PART_BYTES"
     ),
   };
 }

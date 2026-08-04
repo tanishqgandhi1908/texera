@@ -90,6 +90,15 @@ export interface ExecutionQuota
  */
 export interface Coeditor extends User {
   clientId: string;
+  /**
+   * Avatar image for participants that have no Texera account to draw one from
+   * — an MCP client such as Claude Desktop supplies its own logo here so the
+   * user can tell at a glance which co-editor is a chatbot. See
+   * `UserAvatarComponent`, which only renders `https:` and `data:image/` URLs.
+   */
+  avatarUrl?: string;
+  /** True when this co-editor is software rather than a person. */
+  isAgent?: boolean;
 }
 
 /**

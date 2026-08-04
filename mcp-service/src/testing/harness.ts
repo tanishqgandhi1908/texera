@@ -41,13 +41,22 @@ export interface Harness {
  * with the deployment faked at the `fetch` boundary. Exercises the whole path a
  * chatbot takes: schema validation, dispatch, handler, error mapping.
  */
-export async function startHarness(deployment: FakeTexera): Promise<Harness> {
+export async function startHarness(
+  deployment: FakeTexera,
+  env: Record<string, string | undefined> = {}
+): Promise<Harness> {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = deployment.fetch;
 
   const config = loadConfig({
     TEXERA_BASE_URL: deployment.origin,
     TEXERA_TOKEN: makeToken(),
+    // The fake deployment is an HTTP-level stand-in with no websocket server,
+    // so joining a shared-editing room would only add a connect timeout to
+    // every workflow_open. The live path has its own test against a real
+    // y-websocket server — see shared-workflow-session.spec.ts in the SDK.
+    TEXERA_LIVE_COEDITING: "false",
+    ...env,
   });
   const context = createContext(config);
   const server = createServer(context);

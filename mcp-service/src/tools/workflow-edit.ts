@@ -26,6 +26,7 @@ import {
   parseWorkflowContent,
   persistWorkflow,
   retrieveWorkflowWithPrivilege,
+  SharedWorkflowSession,
   WorkflowUtilService,
   type OperatorLink,
   type OperatorPredicate,
@@ -35,7 +36,7 @@ import type { McpContext } from "../context";
 import { ToolError } from "../errors";
 import { formatTable, joinSections } from "../format";
 import { registerTool } from "../register";
-import type { EditSession } from "../session";
+import { recordEdit, type EditSession } from "../session";
 import { suggestOperatorTypes } from "./operator";
 
 const widArg = z
@@ -43,6 +44,83 @@ const widArg = z
   .int()
   .optional()
   .describe("Workflow id. Defaults to the workflow most recently opened in this session.");
+
+/**
+ * Loads a workflow and, when live co-editing is on, joins its shared-editing
+ * room so the user sees this client in the participant list and watches the
+ * edits land on their canvas.
+ *
+ * Which copy of the graph wins depends on who else is there:
+ *
+ * - **Someone is in the room** — a browser tab is open, and it may hold edits
+ *   that were never persisted. The room wins, and this client edits on top of
+ *   what the user is looking at.
+ * - **The room is empty** — it is either fresh or a leftover: the y-websocket
+ *   server keeps a document in memory after the last tab closes, so its
+ *   contents may predate saves made since. The stored workflow wins, which is
+ *   also what a browser tab does when it opens one.
+ *
+ * A failure to join is not a failure to open. The room is a nicety; falling
+ * back to REST-only editing loses the live canvas, not the ability to work.
+ */
+async function openSession(ctx: McpContext, wid: number): Promise<{ session: EditSession; liveNote?: string }> {
+  const fetched = await retrieveWorkflowWithPrivilege(ctx.client, wid);
+  let content = parseWorkflowContent(fetched.content);
+
+  let live: SharedWorkflowSession | undefined;
+  let liveNote: string | undefined;
+
+  if (ctx.config.liveCoediting && !fetched.readonly) {
+    const candidate = new SharedWorkflowSession({
+      baseUrl: ctx.config.baseUrl,
+      wid,
+      presence: {
+        ...ctx.config.presence,
+        isAgent: true,
+        email: ctx.config.claims.email,
+        uid: ctx.config.claims.userId,
+      },
+    });
+    try {
+      await candidate.connect();
+      live = candidate;
+    } catch (error) {
+      candidate.destroy();
+      liveNote =
+        `Could not join the shared-editing room (${error instanceof Error ? error.message : String(error)}), ` +
+        `so edits will not appear live on an open browser tab. They still save normally.`;
+    }
+  }
+
+  if (live) {
+    if (live.peerCount > 0) {
+      content = { ...content, ...live.readContent() };
+      liveNote =
+        `Joined the shared-editing room as "${ctx.config.presence.name}" — ` +
+        `${live.peerCount} other participant(s) are there, so edits appear on their canvas immediately. ` +
+        `Started from the graph they are looking at, which may differ from the last saved version.`;
+    } else {
+      live.replaceContent(content);
+      liveNote =
+        `Joined the shared-editing room as "${ctx.config.presence.name}". ` +
+        `Nobody else is in it, so edits will show up when someone opens the workflow.`;
+    }
+  }
+
+  const session = ctx.sessions.open(
+    {
+      wid: fetched.wid,
+      name: fetched.name,
+      description: fetched.description,
+      content,
+      lastModifiedTime: fetched.lastModifiedTime,
+      isPublic: fetched.isPublished,
+    },
+    fetched.readonly,
+    live
+  );
+  return { session, liveNote };
+}
 
 /** Ports are addressed by ordinal in the tools and by id in the stored graph. */
 function portIdAt(operator: OperatorPredicate, kind: "input" | "output", ordinal: number): string {
@@ -210,27 +288,19 @@ export function registerWorkflowEditTools(server: McpServer, context: McpContext
     description:
       "Load a workflow's operator graph into this session and show it. All the editing tools act on the " +
       "open workflow and keep changes in memory until workflow_save writes them back. " +
-      "Opening also records the workflow's last-modified time so a later save can detect concurrent edits.",
+      "Opening also joins the workflow's shared-editing room, so the user sees this assistant in the " +
+      "participant list and watches each edit appear on their canvas, and records the workflow's " +
+      "last-modified time so a later save can detect concurrent edits.",
     inputSchema: { wid: z.number().int().describe("Workflow id, from workflow_list") },
     annotations: { readOnlyHint: true },
     handler: async (args: { wid: number }, ctx) => {
-      const fetched = await retrieveWorkflowWithPrivilege(ctx.client, args.wid);
-      const session = ctx.sessions.open(
-        {
-          wid: fetched.wid,
-          name: fetched.name,
-          description: fetched.description,
-          content: parseWorkflowContent(fetched.content),
-          lastModifiedTime: fetched.lastModifiedTime,
-          isPublic: fetched.isPublished,
-        },
-        fetched.readonly
-      );
+      const { session, liveNote } = await openSession(ctx, args.wid);
       return joinSections(
         describeWorkflow(session),
-        fetched.readonly
+        session.readonly
           ? "You have read-only access. Edits will be rejected; use workflow_duplicate for an editable copy."
-          : undefined
+          : undefined,
+        liveNote
       );
     },
   });
@@ -313,7 +383,7 @@ export function registerWorkflowEditTools(server: McpServer, context: McpContext
       }
 
       autoLayoutWorkflow(session.state);
-      session.dirty = true;
+      recordEdit(session, { editing: operator.operatorID, highlighted: [operator.operatorID] });
 
       return (
         `Added ${operator.operatorID} (${operator.operatorType}) with ` +
@@ -375,7 +445,7 @@ export function registerWorkflowEditTools(server: McpServer, context: McpContext
         throw new ToolError("Nothing to change — pass at least one of properties, inputs, label.");
       }
 
-      session.dirty = true;
+      recordEdit(session, { editing: args.operator_id, highlighted: [args.operator_id] });
       return `${args.operator_id}: ${changes.join("; ")}.\nUnsaved — call workflow_save to persist.`;
     },
   });
@@ -396,7 +466,7 @@ export function registerWorkflowEditTools(server: McpServer, context: McpContext
       requireOperator(session, args.operator_id);
       const attached = session.state.getLinksConnectedToOperator(args.operator_id).length;
       session.state.deleteOperator(args.operator_id);
-      session.dirty = true;
+      recordEdit(session);
       return (
         `Deleted ${args.operator_id} and ${attached} attached link(s).\n` +
         `Unsaved — call workflow_save to persist, or workflow_discard to abandon.`
@@ -446,7 +516,7 @@ export function registerWorkflowEditTools(server: McpServer, context: McpContext
         target: { operatorID: target.operatorID, portID: toPortId },
       });
       autoLayoutWorkflow(session.state);
-      session.dirty = true;
+      recordEdit(session, { highlighted: [args.from_operator_id, args.to_operator_id] });
 
       return (
         `Connected ${args.from_operator_id}:out${args.from_port ?? 0} -> ${args.to_operator_id}:in${args.to_port ?? 0}.\n` +
@@ -494,7 +564,7 @@ export function registerWorkflowEditTools(server: McpServer, context: McpContext
       }
 
       session.state.deleteLink(link.linkID);
-      session.dirty = true;
+      recordEdit(session);
       return `Disconnected ${args.from_operator_id} from ${args.to_operator_id}.\nUnsaved — call workflow_save to persist.`;
     },
   });
@@ -509,7 +579,7 @@ export function registerWorkflowEditTools(server: McpServer, context: McpContext
     handler: async (args: { wid?: number }, ctx) => {
       const session = ctx.sessions.requireWritable(args.wid);
       autoLayoutWorkflow(session.state);
-      session.dirty = true;
+      recordEdit(session);
       return `Re-laid out ${session.state.getAllOperators().length} operator(s). Unsaved — call workflow_save to persist.`;
     },
   });
@@ -651,21 +721,16 @@ export function registerWorkflowEditTools(server: McpServer, context: McpContext
     annotations: { destructiveHint: true },
     handler: async (args: { wid?: number }, ctx) => {
       const session = ctx.sessions.require(args.wid);
-      const fetched = await retrieveWorkflowWithPrivilege(ctx.client, session.wid);
-      const reopened = ctx.sessions.open(
-        {
-          wid: fetched.wid,
-          name: fetched.name,
-          description: fetched.description,
-          content: parseWorkflowContent(fetched.content),
-          lastModifiedTime: fetched.lastModifiedTime,
-          isPublic: fetched.isPublished,
-        },
-        fetched.readonly
-      );
+      const wid = session.wid;
+      // Leave the room first: re-opening rejoins it, and the reload has to put
+      // the saved graph back on the canvas rather than adopt what is there now.
+      ctx.sessions.close(wid);
+      const { session: reopened, liveNote } = await openSession(ctx, wid);
+      reopened.live?.replaceContent(reopened.state.getWorkflowContent());
       return joinSections(
-        `Discarded unsaved edits to workflow ${session.wid}; reloaded from the server.`,
-        describeWorkflow(reopened)
+        `Discarded unsaved edits to workflow ${wid}; reloaded from the server.`,
+        describeWorkflow(reopened),
+        liveNote
       );
     },
   });

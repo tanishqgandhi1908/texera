@@ -19,6 +19,7 @@
 
 <texera-user-avatar
   [googleAvatar]="coeditor.googleAvatar"
+  [avatarUrl]="coeditor.avatarUrl"
   [userName]="coeditor.name || ''"
   [userColor]="coeditor.color || ''"
   nz-button
@@ -29,6 +30,12 @@
 </texera-user-avatar>
 <nz-dropdown-menu #menu="nzDropdownMenu">
   <ul nz-menu>
+    <li
+      *ngIf="coeditor.isAgent"
+      nz-menu-item
+      nzDisabled>
+      <b>{{coeditor.name}}</b>&nbsp;is an assistant editing through Texera's MCP server.
+    </li>
     <li
       *ngIf="!(coeditorPresenceService.shadowingModeEnabled && coeditorPresenceService.shadowingCoeditor?.clientId === this.coeditor.clientId)"
       nz-menu-item
