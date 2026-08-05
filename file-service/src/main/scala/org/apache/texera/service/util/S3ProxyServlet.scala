@@ -25,8 +25,9 @@ import org.apache.texera.auth.JwtParser
 import org.apache.texera.common.config.StorageConfig
 import org.apache.texera.dao.SqlServer
 import org.apache.texera.dao.SqlServer.withTransaction
-import org.apache.texera.dao.jooq.generated.tables.daos.ModelDao
-import org.apache.texera.service.resource.ModelAccessResource.userHasReadAccess
+import org.apache.texera.dao.jooq.generated.tables.daos.{DatasetDao, ModelDao}
+import org.apache.texera.service.resource.DatasetAccessResource
+import org.apache.texera.service.resource.ModelAccessResource
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials
 import software.amazon.awssdk.auth.signer.AwsS3V4Signer
 import software.amazon.awssdk.auth.signer.params.AwsS3V4SignerParams
@@ -52,8 +53,8 @@ import scala.jdk.OptionConverters._
   *      bearer capability; the pod-side S3 signature is not re-validated, and no LakeFS
   *      credentials ever leave this service),
   *   2. verifies the JWT and checks that its user has read access to the requested model
-  *      repository (the S3 bucket), using the same `userHasReadAccess` gate as the model
-  *      REST endpoints, and
+  *      or dataset repository (the S3 bucket), using the same `userHasReadAccess` gates as
+  *      those resources' REST endpoints, and
   *   3. re-signs the request with the global LakeFS credentials and forwards it to the
   *      LakeFS S3 gateway, streaming the response back.
   *
@@ -134,11 +135,13 @@ class S3ProxyServlet extends HttpServlet with LazyLogging {
   }
 
   /**
-    * True iff `uid` has read access to the model backing `repositoryName`, cached for a
-    * short window. Read access to a repository grants read to all of its commits, so no
-    * per-commit check is needed: a mount addresses a single repository's data and any
-    * version the user may already read. Only model repositories are mountable, so a
-    * repository with no model behind it is denied.
+    * True iff `uid` has read access to the model or dataset backing `repositoryName`,
+    * cached for a short window. Read access to a repository grants read to all of its
+    * commits, so no per-commit check is needed: a mount addresses a single repository's
+    * data and any version the user may already read.
+    *
+    * Both kinds are mountable, and a repository name identifies which it is, so each is
+    * checked against its own access gate. A repository behind neither is denied.
     */
   private def authorizedToRead(uid: Integer, repositoryName: String): Boolean = {
     val now = System.currentTimeMillis()
@@ -149,11 +152,17 @@ class S3ProxyServlet extends HttpServlet with LazyLogging {
     }
 
     val allowed = withTransaction(SqlServer.getInstance().createDSLContext()) { ctx =>
-      val models = new ModelDao(ctx.configuration())
+      val model = new ModelDao(ctx.configuration())
         .fetchByRepositoryName(repositoryName)
         .asScala
-        .toList
-      models.nonEmpty && userHasReadAccess(ctx, models.head.getMid, uid)
+        .headOption
+      lazy val dataset = new DatasetDao(ctx.configuration())
+        .fetchByRepositoryName(repositoryName)
+        .asScala
+        .headOption
+
+      model.exists(m => ModelAccessResource.userHasReadAccess(ctx, m.getMid, uid)) ||
+      dataset.exists(d => DatasetAccessResource.userHasReadAccess(ctx, d.getDid, uid))
     }
     authCache.put(cacheKey, CachedDecision(allowed, now + AuthCacheTtlMs))
     allowed
