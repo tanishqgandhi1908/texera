@@ -19,6 +19,7 @@
 
 package org.apache.texera.service.util
 
+import org.apache.texera.common.config.KubernetesConfig
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
@@ -30,5 +31,17 @@ class KubernetesClientSpec extends AnyFlatSpec with Matchers {
 
   it should "handle a cuid of 0" in {
     KubernetesClient.generatePodName(0) shouldBe "computing-unit-0"
+  }
+
+  "mountHostPath" should "give each computing unit its own directory under the mount root" in {
+    // A model version is named <repository>:<commit> everywhere else, and mounts it at
+    // <this>/<repository>/<commit>. So this path is the only thing keeping two computing
+    // units that mount the same version from sharing one mount.
+    KubernetesClient.mountHostPath(7) should endWith("/7")
+    KubernetesClient.mountHostPath(7) should not be KubernetesClient.mountHostPath(8)
+  }
+
+  it should "stay under the mount root the mounter daemonset is given" in {
+    KubernetesClient.mountHostPath(7) shouldBe s"${KubernetesConfig.mounterHostRoot}/7"
   }
 }

@@ -195,6 +195,45 @@ def test_a_rejected_mount_keeps_a_sibling_commit_that_is_mounted(mounter, cu_dir
     assert os.path.isdir(live)  # the working mount is untouched
 
 
+def test_two_computing_units_mounting_one_model_get_separate_mounts(mounter):
+    """The same model version, mounted by two CUs, is two mounts and never one.
+
+    This is what keeps computing units from being able to affect each other through a
+    model: the mount point is under the CU's own directory, which is also the only part
+    of the mount root a CU pod has in its filesystem, and each mount is its own GeeseFS.
+    A layout that dropped the cuid — keying only on repository and commit, which is how a
+    model version is named everywhere else — would silently share one mount between them.
+    """
+    seven = mounter.do_mount("7", "model-1", "abc", "jwt-of-7", "http://fs")
+    eight = mounter.do_mount("8", "model-1", "abc", "jwt-of-8", "http://fs")
+
+    assert seven == os.path.join(mounter.MOUNT_ROOT, "7", "model-1", "abc")
+    assert eight == os.path.join(mounter.MOUNT_ROOT, "8", "model-1", "abc")
+    assert seven != eight
+    # Two GeeseFS processes, each with the JWT of the CU that asked for it.
+    geesefs = [(cmd, kwargs) for cmd, kwargs in mounter.runs if cmd[0] == "geesefs"]
+    assert [cmd[-1] for cmd, _ in geesefs] == [seven, eight]
+    assert [kwargs["env"]["AWS_ACCESS_KEY_ID"] for _, kwargs in geesefs] == ["jwt-of-7", "jwt-of-8"]
+
+
+def test_tearing_down_one_computing_unit_leaves_the_others_model_mounted(mounter):
+    seven = mounter.do_mount("7", "model-1", "abc", "jwt", "http://fs")
+    eight = mounter.do_mount("8", "model-1", "abc", "jwt", "http://fs")
+
+    assert mounter.clean_cu_dir("7")
+
+    assert not os.path.exists(seven)
+    assert eight in mounter.mounts()
+
+
+def test_listing_a_computing_units_mounts_never_shows_another_units(mounter):
+    mounter.do_mount("7", "model-1", "abc", "jwt", "http://fs")
+    mounter.do_mount("8", "model-2", "def", "jwt", "http://fs")
+
+    assert [m["repositoryName"] for m in mounter.list_mounts("7")] == ["model-1"]
+    assert [m["repositoryName"] for m in mounter.list_mounts("8")] == ["model-2"]
+
+
 def test_do_mount_times_out_if_the_mount_never_appears(mounter, monkeypatch):
     monkeypatch.setattr(mounter, "MOUNT_TIMEOUT_S", 0)
     mounter.geesefs_mounts = False  # exits 0 without the mount ever appearing

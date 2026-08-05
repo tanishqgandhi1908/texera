@@ -40,6 +40,18 @@ object KubernetesClient {
 
   def generatePodName(cuid: Int): String = s"$podNamePrefix-$cuid"
 
+  /**
+    * The host directory a computing unit's model mounts live in.
+    *
+    * The cuid in here is the whole of the isolation between computing units. A CU pod
+    * mounts this directory and nothing above it, and the mounter creates every GeeseFS
+    * mount for that CU underneath it, so two CUs that mount the same model version get
+    * two separate mounts and neither can reach the other's. Dropping the cuid — keying on
+    * repository and commit alone, which is how a model version is named everywhere else —
+    * would quietly collapse them into one shared mount.
+    */
+  def mountHostPath(cuid: Int): String = s"${KubernetesConfig.mounterHostRoot}/$cuid"
+
   def podExists(cuid: Int): Boolean = {
     getPodByName(generatePodName(cuid)).isDefined
   }
@@ -207,7 +219,7 @@ object KubernetesClient {
       .addNewVolume()
       .withName("texera-mounts")
       .withNewHostPath()
-      .withPath(s"${KubernetesConfig.mounterHostRoot}/$cuid")
+      .withPath(mountHostPath(cuid))
       .withType("DirectoryOrCreate")
       .endHostPath()
       .endVolume()
