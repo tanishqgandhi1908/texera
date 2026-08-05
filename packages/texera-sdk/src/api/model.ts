@@ -257,7 +257,8 @@ export async function getModelPresignedDownloadUrl(
 
 /**
  * The mount locator for a model version: `<repositoryName>:<commitHash>`, the
- * form the computing-unit mount API and a Python UDF's `modelVariables` take.
+ * form the computing-unit mount API takes, and what a `models` UI parameter
+ * resolves to when its execution starts.
  */
 export function modelLocator(model: Model, version: ModelVersion): string {
   return `${model.repositoryName ?? `model-${model.mid}`}:${version.versionHash}`;

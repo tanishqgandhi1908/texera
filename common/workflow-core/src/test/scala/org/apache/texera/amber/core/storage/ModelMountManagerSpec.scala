@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.texera.amber.engine.common
+package org.apache.texera.amber.core.storage
 
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -28,6 +28,19 @@ class ModelMountManagerSpec extends AnyFlatSpec with Matchers {
     for (bad <- Seq("no-colon", "", ":", "repo:", ":commit")) {
       withClue(s"locator '$bad': ") {
         an[IllegalArgumentException] should be thrownBy ModelMountManager.ensureMounted(bad)
+      }
+    }
+  }
+
+  "mountPointOf" should "place a version under <root>/<repository>/<commit> without mounting it" in {
+    ModelMountManager.mountPointOf("model-15:abc123").toString shouldBe
+      "/mnt/texera-mounts/model-15/abc123"
+  }
+
+  it should "reject the same locators ensureMounted rejects" in {
+    for (bad <- Seq("no-colon", "", ":", "repo:", ":commit")) {
+      withClue(s"locator '$bad': ") {
+        an[IllegalArgumentException] should be thrownBy ModelMountManager.mountPointOf(bad)
       }
     }
   }

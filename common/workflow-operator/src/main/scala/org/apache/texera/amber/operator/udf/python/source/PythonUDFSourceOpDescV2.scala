@@ -67,7 +67,6 @@ class PythonUDFSourceOpDescV2 extends SourceOperatorDescriptor {
   @JsonPropertyDescription("The columns of the source")
   var columns: List[Attribute] = List.empty
 
-
   @JsonProperty()
   @JsonSchemaTitle("UI parameters")
   @JsonPropertyDescription(
@@ -81,9 +80,10 @@ class PythonUDFSourceOpDescV2 extends SourceOperatorDescriptor {
       workflowId: WorkflowIdentity,
       executionId: ExecutionIdentity
   ): PhysicalOp = {
-    // UI parameter values are baked into the code the worker runs; models parameters
-    // additionally tell us which model versions that worker has to mount first.
-    val (executedCode, mountedModels) = PythonUdfUiParameterSupport.injectInto(code, uiParameters)
+    // UI parameter values are baked into the code the worker runs. A models parameter is
+    // left naming its model version here and bound to a mount path when the execution
+    // starts, so that editing a workflow never pays to resolve one.
+    val executedCode = PythonUdfUiParameterSupport.injectForCompilation(code, uiParameters)
 
     require(workers >= 1, "Need at least 1 worker.")
 
@@ -99,7 +99,12 @@ class PythonUDFSourceOpDescV2 extends SourceOperatorDescriptor {
       }
 
     val physicalOp = PhysicalOp
-      .sourcePhysicalOp(workflowId, executionId, operatorIdentifier, OpExecWithCode(executedCode, "python"))
+      .sourcePhysicalOp(
+        workflowId,
+        executionId,
+        operatorIdentifier,
+        OpExecWithCode(executedCode, "python")
+      )
       .withInputPorts(operatorInfo.inputPorts)
       .withOutputPorts(operatorInfo.outputPorts)
       .withIsOneToManyOp(true)
@@ -108,7 +113,7 @@ class PythonUDFSourceOpDescV2 extends SourceOperatorDescriptor {
       )
       .withLocationPreference(Option.empty)
       .withPveName(pveName)
-      .withMountedModels(mountedModels)
+      .withExecutionTimeBinding(PythonUdfUiParameterSupport.executionBinding(code, uiParameters))
 
     if (workers > 1) {
       physicalOp

@@ -168,7 +168,8 @@ object PhysicalOp {
     "outputPorts", // same reason with above
     "propagateSchema", // function type, so ignore it
     "locationPreference", // ignore it for the deserialization
-    "partitionRequirement" // ignore it for deserialization
+    "partitionRequirement", // ignore it for deserialization
+    "executionTimeBinding" // holds closures, and forcing it would do real work
   )
 )
 case class PhysicalOp(
@@ -215,10 +216,10 @@ case class PhysicalOp(
     suggestedWorkerNum: Option[Int] = None,
     // name of the PVE to execute within
     pveName: String = "",
-    // models to expose to this operator's Python workers as local-path variables:
-    // variable name -> model-version locator "<repositoryName>:<commitHash>". Each is
-    // ensured mounted before the worker starts and bound to the variable as its mount path.
-    mountedModels: Map[String, String] = Map.empty
+    // setup this operator postpones until its execution starts, rather than paying for it
+    // on every compile of the workflow being edited. None when there is nothing to defer,
+    // which is every operator that names no models.
+    executionTimeBinding: Option[ExecutionTimeBinding] = None
 ) extends LazyLogging {
 
   // all the "dependee" links are also blocking
@@ -246,6 +247,28 @@ case class PhysicalOp(
       case _ => false
     }
   }
+
+  /**
+    * The executor initialization info to actually run this operator with.
+    *
+    * Differs from `opExecInitInfo` only for an operator that deferred part of its setup:
+    * `opExecInitInfo` is the compile-time view, cheap to produce and enough to propagate
+    * schemas, while this one is the finished article. Forcing it does real work (a
+    * database round trip per model), so ask for it once, when the execution starts —
+    * never on the editing path.
+    */
+  @JsonIgnore
+  def executableOpExecInitInfo: OpExecInitInfo =
+    executionTimeBinding.map(_.opExecInitInfo).getOrElse(opExecInitInfo)
+
+  /**
+    * Model versions this operator's workers must mount: variable name -> locator
+    * "<repositoryName>:<commitHash>". Forces the execution-time binding, with the same
+    * caveat as [[executableOpExecInitInfo]].
+    */
+  @JsonIgnore
+  def mountedModels: Map[String, String] =
+    executionTimeBinding.map(_.mountedModels).getOrElse(Map.empty)
 
   @JsonIgnore
   def getCode: String = {
@@ -397,8 +420,8 @@ case class PhysicalOp(
     this.copy(pveName = name)
   }
 
-  def withMountedModels(mountedModels: Map[String, String]): PhysicalOp = {
-    this.copy(mountedModels = mountedModels)
+  def withExecutionTimeBinding(binding: Option[ExecutionTimeBinding]): PhysicalOp = {
+    this.copy(executionTimeBinding = binding)
   }
 
   /**

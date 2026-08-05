@@ -151,7 +151,7 @@ export async function listMountedModels(client: TexeraClient, cuid: number): Pro
 /**
  * Mounts a model version onto a computing unit. `modelPath` is the logical
  * `/models/ownerEmail/modelName/versionName` string, the same value a Python
- * UDF's `modelVariables` entry names.
+ * UDF's `models` UI parameter holds.
  *
  * Kubernetes units only — a local unit has no node mounter to talk to.
  */

@@ -17,7 +17,7 @@
  * under the License.
  */
 
-package org.apache.texera.amber.engine.common
+package org.apache.texera.amber.core.storage
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.typesafe.scalalogging.LazyLogging
@@ -86,21 +86,38 @@ object ModelMountManager extends LazyLogging {
     s"http://$nodeIp:$port"
   }
 
+  /** Splits a locator "<repositoryName>:<commitHash>" into its two halves. */
+  private def parseLocator(locator: String): (String, String) =
+    locator.split(":", 2) match {
+      case Array(repo, commit) if repo.nonEmpty && commit.nonEmpty => (repo, commit)
+      case _ =>
+        throw new IllegalArgumentException(
+          s"Invalid model mount locator '$locator'; expected <repositoryName>:<commitHash>."
+        )
+    }
+
+  /**
+    * Where the model version identified by `locator` is (or will be) readable in this pod.
+    *
+    * Pure: it neither mounts nor checks whether anything is mounted. It exists because the
+    * path has to be settled slightly before the mount does — the value handed to a UDF's
+    * models parameter is this path, and it is bound while the execution is being set up,
+    * whereas the mount itself happens in whichever worker ends up running the operator.
+    */
+  def mountPointOf(locator: String): Path = {
+    val (repositoryName, commitHash) = parseLocator(locator)
+    inPodMountRoot.resolve(repositoryName).resolve(commitHash)
+  }
+
   /**
     * Ensure the model version identified by the locator "<repositoryName>:<commitHash>"
     * is mounted, and return the local (in-pod) mount point. Thread-safe and idempotent.
     */
   def ensureMounted(locator: String): Path =
     synchronized {
-      val (repositoryName, commitHash) = locator.split(":", 2) match {
-        case Array(repo, commit) if repo.nonEmpty && commit.nonEmpty => (repo, commit)
-        case _ =>
-          throw new IllegalArgumentException(
-            s"Invalid model mount locator '$locator'; expected <repositoryName>:<commitHash>."
-          )
-      }
+      val (repositoryName, commitHash) = parseLocator(locator)
 
-      val mountPoint = inPodMountRoot.resolve(repositoryName).resolve(commitHash)
+      val mountPoint = mountPointOf(locator)
       if (isMounted(mountPoint)) {
         logger.info(s"Model $locator already mounted at $mountPoint")
         return mountPoint

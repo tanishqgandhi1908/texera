@@ -29,6 +29,9 @@ import org.apache.texera.amber.util.JSONUtils.objectMapper
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
 
+import java.nio.charset.StandardCharsets
+import java.util.Base64
+
 class PythonUDFOpDescV2Spec extends AnyFlatSpec with Matchers {
 
   private val workflowId = WorkflowIdentity(1L)
@@ -276,6 +279,49 @@ class PythonUDFOpDescV2Spec extends AnyFlatSpec with Matchers {
     val ex = intercept[RuntimeException] { d.getPhysicalOp(workflowId, executionId) }
     ex.getMessage should include("No model selected")
   }
+
+  // The rest of this group is about *when* a models parameter is resolved. Compilation
+  // runs again on every edit to a workflow, so it must not do the work — which these
+  // tests can assert simply by running at all, since resolving needs a database and
+  // these tests have none.
+  it should "compile a models parameter without resolving the model version" in {
+    val d = new PythonUDFOpDescV2
+    d.code = pythonUdfClass
+    d.uiParameters = List(modelsParameter("IRIS_MODEL", "/models/bob@texera.com/iris/v1"))
+
+    d.getPhysicalOp(workflowId, executionId).opExecInitInfo match {
+      // Compilation leaves the parameter naming the version the user picked. That value
+      // is a placeholder for the mount path, not something the UDF is meant to see.
+      case OpExecWithCode(code, _) => code should include(encoded("/models/bob@texera.com/iris/v1"))
+      case other                   => fail(s"expected OpExecWithCode, got $other")
+    }
+  }
+
+  it should "defer a models parameter to an execution-time binding" in {
+    val d = new PythonUDFOpDescV2
+    d.code = pythonUdfClass
+    d.uiParameters = List(modelsParameter("IRIS_MODEL", "/models/bob@texera.com/iris/v1"))
+
+    d.getPhysicalOp(workflowId, executionId).executionTimeBinding should not be empty
+  }
+
+  it should "defer nothing when the parameters name no models" in {
+    val d = new PythonUDFOpDescV2
+    d.code = pythonUdfClass
+    val parameter = new UiUDFParameter
+    parameter.attribute = new Attribute("threshold", AttributeType.INTEGER)
+    parameter.value = "7"
+    d.uiParameters = List(parameter)
+
+    val physical = d.getPhysicalOp(workflowId, executionId)
+    physical.executionTimeBinding shouldBe empty
+    // Nothing deferred means the code compilation produced is already the code to run.
+    physical.executableOpExecInitInfo shouldBe physical.opExecInitInfo
+  }
+
+  /** How [[PythonTemplateBuilder]] renders a UI parameter value into generated code. */
+  private def encoded(value: String): String =
+    Base64.getEncoder.encodeToString(value.getBytes(StandardCharsets.UTF_8))
 
   it should "leave code unchanged when no UI parameters are declared" in {
     val d = new PythonUDFOpDescV2

@@ -89,7 +89,6 @@ class DualInputPortsPythonUDFOpDescV2 extends LogicalOp {
   )
   var outputColumns: List[Attribute] = List()
 
-
   @JsonProperty()
   @JsonSchemaTitle("UI parameters")
   @JsonPropertyDescription(
@@ -116,12 +115,10 @@ class DualInputPortsPythonUDFOpDescV2 extends LogicalOp {
         trimmed
       }
 
-    // UI parameter values are baked into the code the worker runs; models parameters
-
-    // additionally tell us which model versions that worker has to mount first.
-
-    val (executedCode, mountedModels) = PythonUdfUiParameterSupport.injectInto(code, uiParameters)
-
+    // UI parameter values are baked into the code the worker runs. A models parameter is
+    // left naming its model version here and bound to a mount path when the execution
+    // starts, so that editing a workflow never pays to resolve one.
+    val executedCode = PythonUdfUiParameterSupport.injectForCompilation(code, uiParameters)
 
     val physicalOp = if (workers > 1) {
       PhysicalOp
@@ -171,7 +168,7 @@ class DualInputPortsPythonUDFOpDescV2 extends LogicalOp {
         })
       )
       .withPveName(pveName)
-      .withMountedModels(mountedModels)
+      .withExecutionTimeBinding(PythonUdfUiParameterSupport.executionBinding(code, uiParameters))
   }
 
   override def operatorInfo: OperatorInfo =

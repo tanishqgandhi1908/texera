@@ -27,6 +27,7 @@ import org.apache.texera.amber.core.virtualidentity.{
   PhysicalOpIdentity,
   WorkflowIdentity
 }
+import org.apache.texera.amber.util.JSONUtils
 import org.scalatest.flatspec.AnyFlatSpec
 
 class PhysicalOpSpec extends AnyFlatSpec {
@@ -147,6 +148,47 @@ class PhysicalOpSpec extends AnyFlatSpec {
     assert(op.getCode == "print(1)")
     val ex = intercept[IllegalAccessError](newOp("c").getCode)
     assert(ex.getMessage == "No code information in this physical operator")
+  }
+
+  // ----- execution-time binding -----
+
+  /** A binding that fails if anything forces it — standing in for the database call. */
+  private object ExplodingBinding extends ExecutionTimeBinding {
+    override def opExecInitInfo: OpExecInitInfo = fail("the binding was forced")
+    override def mountedModels: Map[String, String] = fail("the binding was forced")
+    private def fail(why: String) = throw new AssertionError(why)
+  }
+
+  "PhysicalOp.executableOpExecInitInfo" should "fall back to the compiled info when nothing is deferred" in {
+    val op = newOp("a").copy(opExecInitInfo = OpExecWithCode("print(1)", "python"))
+    assert(op.executableOpExecInitInfo == op.opExecInitInfo)
+    assert(op.mountedModels.isEmpty)
+  }
+
+  it should "come from the binding when one is set" in {
+    val bound = OpExecWithCode("print(2)", "python")
+    val binding = new ExecutionTimeBinding {
+      override val opExecInitInfo: OpExecInitInfo = bound
+      override val mountedModels: Map[String, String] = Map("M" -> "model-1:abc")
+    }
+    val op = newOp("a")
+      .copy(opExecInitInfo = OpExecWithCode("print(1)", "python"))
+      .withExecutionTimeBinding(Some(binding))
+    assert(op.executableOpExecInitInfo == bound)
+    assert(op.mountedModels == Map("M" -> "model-1:abc"))
+  }
+
+  // The compiling service serializes the whole physical plan back to the editor on every
+  // recompile. If Jackson could reach the binding through a getter, editing a workflow
+  // would resolve and mount its models over and over — which is the entire thing deferring
+  // them was meant to avoid.
+  it should "not be forced by serializing the operator" in {
+    val op = newOp("a")
+      .copy(opExecInitInfo = OpExecWithCode("print(1)", "python"))
+      .withExecutionTimeBinding(Some(ExplodingBinding))
+    val json = JSONUtils.objectMapper.writeValueAsString(op)
+    assert(!json.contains("mountedModels"))
+    assert(!json.contains("executionTimeBinding"))
   }
 
   // ----- with-builders -----

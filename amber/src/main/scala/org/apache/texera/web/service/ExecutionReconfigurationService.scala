@@ -90,7 +90,9 @@ class ExecutionReconfigurationService(
 
     val reconfigurationId = UUID.randomUUID().toString
     val updateExecutorRequests = reconfigurations.map {
-      case (op, _) => UpdateExecutorRequest(op.id, op.opExecInitInfo)
+      // executableOpExecInitInfo, not opExecInitInfo: a replacement operator is built by
+      // the compiler and so arrives with its execution-time setup still deferred.
+      case (op, _) => UpdateExecutorRequest(op.id, op.executableOpExecInitInfo)
     }
     dispatch(
       WorkflowReconfigureRequest(

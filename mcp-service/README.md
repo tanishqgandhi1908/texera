@@ -117,13 +117,15 @@ in-memory graph, so you can test before committing to a save.
 workflow_open → add/modify/delete → workflow_validate → workflow_run → workflow_save
 ```
 
-**A model is reached by binding it, not by mounting it.** A Python UDF names a committed version in its
-`modelVariables` property, and the engine mounts that version into the computing unit when the worker
-starts — as a read-only filesystem, so a multi-gigabyte checkpoint costs a few hundred milliseconds and
-only the bytes the UDF reads ever move. There is no mount step to perform or to forget.
+**A model is reached by binding it, not by mounting it.** A Python UDF declares
+`self.UiParameter("NAME", UiParameterType.MODELS)` in its code and the property panel gives that row a
+model picker; the committed version it names is mounted into the computing unit when the run starts —
+as a read-only filesystem, so a multi-gigabyte checkpoint costs a few hundred milliseconds and only the
+bytes the UDF reads ever move. The variable arrives holding the directory it was mounted at. There is
+no mount step to perform or to forget, and each computing unit gets its own mount.
 
 ```
-model_create_version → workflow_add_operator(… modelVariables …) → workflow_run
+model_create_version → workflow_add_operator(… uiParameters: [{ NAME: /models/… }] …) → workflow_run
 ```
 
 ---
@@ -153,8 +155,8 @@ model_create_version → workflow_add_operator(… modelVariables …) → workf
 
 Trained weights, versioned like datasets and **mounted** rather than copied — a computing unit exposes
 a model version as a read-only filesystem, so a UDF can `torch.load` a multi-gigabyte checkpoint without
-the pod ever downloading it. Mounting happens on its own: a UDF names the version it wants and the
-worker mounts it at startup.
+the pod ever downloading it. Mounting happens on its own: a UDF names the version it wants and it is
+mounted when the run starts, never while the workflow is merely being edited.
 
 | Tool | What it does |
 | --- | --- |

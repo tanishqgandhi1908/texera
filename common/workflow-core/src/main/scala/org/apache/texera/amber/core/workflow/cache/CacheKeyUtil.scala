@@ -192,10 +192,17 @@ object CacheKeyUtil {
     * Serialize the operator's exec init info deterministically via its proto string.
     *
     * The cache key is computed at the physical-plan layer, where the operator Desc is not
-    * available on a `PhysicalOp`; only `opExecInitInfo` is. It is also the concrete execution
-    * definition the engine actually runs, so hashing it ties the key to exactly what produces a
-    * port's result, not to a higher-level description that could map to different executions. If
-    * what executes a port changes, the key changes, so a stale result is never reused.
+    * available on a `PhysicalOp`; only `opExecInitInfo` is. It is also nearly the execution
+    * definition the engine runs, so hashing it ties the key to exactly what produces a port's
+    * result, not to a higher-level description that could map to different executions. If what
+    * executes a port changes, the key changes, so a stale result is never reused.
+    *
+    * "Nearly", because this is deliberately the compile-time view rather than
+    * `executableOpExecInitInfo`: the difference is that a models UI parameter still names the
+    * model version the user picked instead of the directory some computing unit mounted it at.
+    * The version is what the result actually depends on, so keying on it is both cheaper (no
+    * resolution to compute a key) and more correct — the same run on a second computing unit
+    * hits the same key.
     */
   private def serializeOpExec(opExecInitInfo: OpExecInitInfo): ObjectNode = {
     val n = objectMapper.createObjectNode()
