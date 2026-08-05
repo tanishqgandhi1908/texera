@@ -90,7 +90,7 @@ model = torch.load(os.path.join(IRIS_MODEL, "iris_embedding_classifier.pt"),
                    map_location="cpu", weights_only=True)
 ```
 
-`IRIS_MODEL` comes from a `self.UiParameter("IRIS_MODEL", UiParameterType.MODELS)` declaration in the
+`IRIS_MODEL` comes from a `self.UiParameter("IRIS_MODEL", AttributeType.STRING, value=Resource.MODEL)` declaration in the
 UDF itself; the property panel offers a model picker for that row, and the value is the mount path.
 The first `torch.load` pays for reading the gigabyte it actually needs; after that, scoring is
 sub-second.

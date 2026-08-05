@@ -46,15 +46,17 @@ class UiUDFParameter {
   var value: EncodableString = ""
 
   /**
-    * Which editor the value gets, and how it is interpreted.
+    * The Texera resource this value names, and so which browser the property panel offers
+    * for it.
     *
-    * Empty (the default) means an ordinary value, typed as `attribute`. "models" means the
-    * value is a model version path chosen from the model picker, which
-    * [[PythonUdfUiParameterSupport]] turns into the directory that version is mounted at
-    * before the value reaches the generated code.
+    * Empty (the default) means ordinary free text, typed as `attribute`. "model" or
+    * "dataset" means the value is that resource's version path, chosen from its browser;
+    * [[PythonUdfUiParameterSupport]] turns it into the directory the version is mounted at
+    * before the value reaches the generated code. Either way the parameter is a string —
+    * only where the string comes from differs.
     *
-    * Derived from the UDF's source, like `attribute` — it is not something the user sets
-    * on the row.
+    * Derived from the UDF's source (`value=Resource.MODEL`), like `attribute` — it is not
+    * something the user sets on the row.
     */
   @JsonProperty()
   @JsonSchemaTitle("Input type")

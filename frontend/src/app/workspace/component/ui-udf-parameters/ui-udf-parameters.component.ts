@@ -19,12 +19,17 @@
 import { Component } from "@angular/core";
 import { NgFor, NgIf } from "@angular/common";
 import { FieldArrayType, FormlyFieldConfig, FormlyModule } from "@ngx-formly/core";
-import { MODELS_INPUT_TYPE } from "../../service/code-editor/ui-udf-parameters-parser.service";
+import { DATASET_INPUT_TYPE, MODEL_INPUT_TYPE } from "../../service/code-editor/ui-udf-parameters-parser.service";
 
 type UiUdfParameterColumn = Readonly<{ label: string; key: string; parentKey?: string; disabled: boolean }>;
 
 const VALUE_COLUMN: UiUdfParameterColumn = { label: "Value", key: "value", disabled: false };
-const TYPE_COLUMN_KEY = "attributeType";
+
+// A row that names a resource is edited by that resource's browser rather than a text box.
+// A row without one keeps the default text editor, which is what an ordinary typed
+// parameter wants.
+const RESOURCE_VALUE_EDITOR = "resourcevalue";
+const RESOURCE_INPUT_TYPES: ReadonlySet<string> = new Set([MODEL_INPUT_TYPE, DATASET_INPUT_TYPE]);
 
 /** Renders inferred Python UDF UI parameters with editable values and locked name/type columns. */
 @Component({
@@ -52,16 +57,6 @@ export class UiUdfParametersComponent extends FieldArrayType<FormlyFieldConfig> 
     field.fieldGroup?.forEach((rowField, index) => this.configureRowFields(rowField, rows[index]));
   }
 
-  /**
-   * Whether the Type cell should show the row's kind rather than its attribute type.
-   *
-   * A models parameter carries a path, so its attribute type is "string" and saying so
-   * tells the reader nothing about the row they are looking at.
-   */
-  showsKindInsteadOfType(column: UiUdfParameterColumn, parameter: { inputType?: string }): boolean {
-    return column.key === TYPE_COLUMN_KEY && parameter?.inputType === MODELS_INPUT_TYPE;
-  }
-
   /** Finds the Formly field config that backs one visible column in a parameter row. */
   getColumnField(rowField: FormlyFieldConfig, column: UiUdfParameterColumn): FormlyFieldConfig | undefined {
     return this.getChildField(column.parentKey ? this.getChildField(rowField, column.parentKey) : rowField, column.key);
@@ -81,8 +76,8 @@ export class UiUdfParametersComponent extends FieldArrayType<FormlyFieldConfig> 
   }
 
   /**
-   * Swaps the Value cell for the model picker on a models parameter. The kind comes from the
-   * row's own data because it was inferred from the UDF's code, not chosen on the row.
+   * Swaps the Value cell for a resource browser when the row names one. The kind comes from
+   * the row's own data because it was inferred from the UDF's code, not chosen on the row.
    */
   private configureValueEditor(rowField: FormlyFieldConfig | undefined, row?: { inputType?: string }): void {
     if (!rowField) return;
@@ -90,7 +85,11 @@ export class UiUdfParametersComponent extends FieldArrayType<FormlyFieldConfig> 
     if (!valueField) return;
 
     const inputType = row?.inputType ?? (rowField.model as { inputType?: string } | undefined)?.inputType;
-    if (inputType === MODELS_INPUT_TYPE) valueField.type = "modelvalue";
+    if (!inputType || !RESOURCE_INPUT_TYPES.has(inputType)) return;
+
+    valueField.type = RESOURCE_VALUE_EDITOR;
+    // Which browser to open is the row's business, not the editor's.
+    valueField.props = { ...(valueField.props ?? {}), resource: inputType };
   }
 
   private configureRowColumns(

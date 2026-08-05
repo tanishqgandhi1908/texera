@@ -38,9 +38,9 @@ class PythonUDFOpDescV2 extends LogicalOp {
     defaultValue =
       "# Declare a UI parameter to get an editable value in the property panel:\n" +
         "#     name = self.UiParameter(\"name\", AttributeType.STRING).value\n" +
-        "# Use the models type to pick a model version; the value is the local\n" +
-        "# directory it is mounted at:\n" +
-        "#     model_dir = self.UiParameter(\"MODEL\", UiParameterType.MODELS).value\n" +
+        "# Pass value=Resource.MODEL (or Resource.DATASET) to pick a version instead of\n" +
+        "# typing text; the value is the local directory it is mounted at:\n" +
+        "#     model_dir = self.UiParameter(\"MODEL\", AttributeType.STRING, value=Resource.MODEL).value\n" +
         "#     torch.load(f\"{model_dir}/model.pt\")\n" +
         "# \n" +
         "# Choose from the following templates:\n" +
@@ -103,8 +103,8 @@ class PythonUDFOpDescV2 extends LogicalOp {
   @JsonSchemaTitle("UI parameters")
   @JsonPropertyDescription(
     "Values for the self.UiParameter(...) calls declared in the code above. Rows appear as you " +
-      "declare them; a parameter of type models is filled from the model picker and reaches your " +
-      "code as the local path that model version is mounted at."
+      "declare them; a parameter that names a model or dataset is filled from that resource's " +
+      "browser and reaches your code as the local path that version is mounted at."
   )
   var uiParameters: List[UiUDFParameter] = List()
 

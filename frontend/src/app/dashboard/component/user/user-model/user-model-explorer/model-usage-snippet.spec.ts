@@ -85,7 +85,9 @@ describe("buildModelUsageSnippet", () => {
 
   it("declares the parameter the property panel offers a model picker for", () => {
     const snippet = buildModelUsageSnippet(ctx());
-    expect(snippet).toContain('churn_predict = self.UiParameter("churn_predict", UiParameterType.MODELS).value');
+    expect(snippet).toContain(
+      'churn_predict = self.UiParameter("churn_predict", AttributeType.STRING, value=Resource.MODEL).value'
+    );
     expect(snippet).toContain("mounted at");
   });
 

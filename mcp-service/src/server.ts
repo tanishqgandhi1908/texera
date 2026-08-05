@@ -53,10 +53,11 @@ Three rules are not obvious from the tool names and cause silent failures if ign
 2. Workflow edits are in memory. workflow_open loads a workflow; the workflow_* editing tools change a
    local copy; workflow_save writes it back. Nothing is persisted until you save. (workflow_run is the
    exception — it runs the in-memory graph, so you can test before saving.)
-3. A model is reached from the UDF's own code, not by mounting it. Declare
-   self.UiParameter("NAME", UiParameterType.MODELS) in the code, then set that row's value in the
-   operator's uiParameters property to a committed version's /models/... path. The engine mounts it when
-   the worker starts and the variable holds its local directory. There is no mount step to perform.
+3. A model or dataset is reached from the UDF's own code, not by mounting it. Declare
+   self.UiParameter("NAME", AttributeType.STRING, value=Resource.MODEL) — or Resource.DATASET — in the
+   code, then set that row's value in the operator's uiParameters property to a committed version's
+   /models/... or /datasets/... path. The engine mounts it when the run starts and the variable holds
+   its local directory. There is no mount step to perform.
 
 A typical build-from-data conversation:
   dataset_create -> dataset_upload_file -> dataset_create_version -> dataset_list_files (copy the workflow path)
@@ -65,7 +66,7 @@ A typical build-from-data conversation:
 
 And with a trained model in it:
   model_create -> model_upload_local_file -> model_create_version
-  -> workflow_add_operator("PythonUDFV2", code declaring UiParameterType.MODELS + uiParameters values)
+  -> workflow_add_operator("PythonUDFV2", code declaring value=Resource.MODEL + uiParameters values)
   -> workflow_run
 
 Opening a workflow also joins its shared-editing room, so the user sees you in the participant list and

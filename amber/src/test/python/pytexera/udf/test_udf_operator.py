@@ -22,7 +22,7 @@ import pandas
 import pytest
 import pytexera.udf.udf_operator as udf_operator
 
-from pytexera import AttributeType, Tuple, TupleLike, UDFOperatorV2
+from pytexera import AttributeType, Resource, Tuple, TupleLike, UDFOperatorV2
 from pytexera import UDFBatchOperator, UDFSourceOperator, UDFTableOperator
 from pytexera.udf.udf_operator import _UiParameterSupport
 
@@ -348,11 +348,50 @@ class TestUiParameterSupport:
         with pytest.raises(TypeError, match="provided multiple times"):
             operator.UiParameter("count", AttributeType.INT, type=AttributeType.INT)
         with pytest.raises(TypeError, match="unexpected keyword argument"):
-            operator.UiParameter("count", AttributeType.INT, value="1")
+            operator.UiParameter("count", AttributeType.INT, unknown="1")
         with pytest.raises(TypeError, match="UiParameter.type is required"):
             operator.UiParameter("count")
         with pytest.raises(TypeError, match="must be an AttributeType"):
             operator.UiParameter("count", object())
+
+    def test_resource_parameters_carry_their_resource(self):
+        operator = MissingParameterOperator()
+
+        for resource in (Resource.MODEL, Resource.DATASET):
+            parameter = operator.UiParameter(
+                f"path_{resource.value}", AttributeType.STRING, value=resource
+            )
+            assert parameter.resource is resource
+            # Still an ordinary string parameter — only its editor differs.
+            assert parameter.type is AttributeType.STRING
+
+    def test_a_parameter_without_a_resource_has_none(self):
+        operator = MissingParameterOperator()
+
+        assert operator.UiParameter("count", AttributeType.INT).resource is None
+
+    def test_resource_value_must_be_a_resource(self):
+        operator = MissingParameterOperator()
+
+        with pytest.raises(TypeError, match="must be a Resource"):
+            operator.UiParameter("model", AttributeType.STRING, value="model")
+
+    def test_a_resource_parameter_must_be_a_string(self):
+        operator = MissingParameterOperator()
+
+        # The value is a path, so any other type would fail to parse what it is handed.
+        with pytest.raises(TypeError, match="must be AttributeType.STRING"):
+            operator.UiParameter("model", AttributeType.INT, value=Resource.MODEL)
+
+    def test_an_injected_resource_path_is_read_back_unchanged(self):
+        operator = MissingParameterOperator()
+        operator._ensure_ui_parameter_state()
+        mount_path = "/mnt/texera-mounts/model-1/abc123"
+        operator._ui_parameter_injected_values = {"MODEL": mount_path}
+
+        parameter = operator.UiParameter("MODEL", AttributeType.STRING, value=Resource.MODEL)
+
+        assert parameter.value == mount_path
 
     def test_super_open_applies_injected_values_once(self):
         operator = SuperOpenParameterOperator()

@@ -118,8 +118,9 @@ workflow_open → add/modify/delete → workflow_validate → workflow_run → w
 ```
 
 **A model is reached by binding it, not by mounting it.** A Python UDF declares
-`self.UiParameter("NAME", UiParameterType.MODELS)` in its code and the property panel gives that row a
-model picker; the committed version it names is mounted into the computing unit when the run starts —
+`self.UiParameter("NAME", AttributeType.STRING, value=Resource.MODEL)` in its code and the property panel
+gives that row a model browser (`Resource.DATASET` gives it a dataset browser instead); the committed
+version it names is mounted into the computing unit when the run starts —
 as a read-only filesystem, so a multi-gigabyte checkpoint costs a few hundred milliseconds and only the
 bytes the UDF reads ever move. The variable arrives holding the directory it was mounted at. There is
 no mount step to perform or to forget, and each computing unit gets its own mount.

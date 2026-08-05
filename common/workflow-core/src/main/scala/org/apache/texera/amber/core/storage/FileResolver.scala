@@ -180,39 +180,70 @@ object FileResolver {
       s"Dataset file $fileName not found."
     ) { (ownerEmail, datasetName, versionName) =>
       // fetch the dataset and version from DB to get the repository name and version hash
-      withTransaction(
-        SqlServer
-          .getInstance()
-          .createDSLContext()
-      ) { ctx =>
-        // fetch the dataset from DB
-        val dataset = ctx
-          .select(DATASET.fields: _*)
-          .from(DATASET)
-          .leftJoin(USER)
-          .on(USER.UID.eq(DATASET.OWNER_UID))
-          .where(USER.EMAIL.eq(ownerEmail))
-          .and(DATASET.NAME.eq(datasetName))
-          .fetchOneInto(classOf[Dataset])
-
-        // fail early if the dataset does not exist (before dereferencing it below)
-        if (dataset == null) {
-          throw new FileNotFoundException(s"Dataset file $fileName not found.")
-        }
-
-        // fetch the dataset version from DB
-        val datasetVersion = ctx
-          .selectFrom(DATASET_VERSION)
-          .where(DATASET_VERSION.DID.eq(dataset.getDid))
-          .and(DATASET_VERSION.NAME.eq(versionName))
-          .fetchOneInto(classOf[DatasetVersion])
-
-        if (datasetVersion == null) {
-          throw new FileNotFoundException(s"Dataset file $fileName not found.")
-        }
-        (dataset.getRepositoryName, datasetVersion.getVersionHash)
-      }
+      fetchDatasetVersion(ownerEmail, datasetName, versionName, s"file $fileName")
     }
+
+  /**
+    * Fetches a dataset and one of its versions from the DB by owner email, dataset name and
+    * version name, returning the version's (repositoryName, versionHash).
+    *
+    * @param originalPath the caller's original path, used only for the error message
+    * @throws java.io.FileNotFoundException if the dataset or the version cannot be found
+    */
+  private def fetchDatasetVersion(
+      ownerEmail: String,
+      datasetName: String,
+      versionName: String,
+      originalPath: String
+  ): (String, String) =
+    withTransaction(
+      SqlServer
+        .getInstance()
+        .createDSLContext()
+    ) { ctx =>
+      // fetch the dataset from DB
+      val dataset = ctx
+        .select(DATASET.fields: _*)
+        .from(DATASET)
+        .leftJoin(USER)
+        .on(USER.UID.eq(DATASET.OWNER_UID))
+        .where(USER.EMAIL.eq(ownerEmail))
+        .and(DATASET.NAME.eq(datasetName))
+        .fetchOneInto(classOf[Dataset])
+
+      // fail early if the dataset does not exist (before dereferencing it below)
+      if (dataset == null) {
+        throw new FileNotFoundException(s"Dataset $originalPath not found.")
+      }
+
+      // fetch the dataset version from DB
+      val datasetVersion = ctx
+        .selectFrom(DATASET_VERSION)
+        .where(DATASET_VERSION.DID.eq(dataset.getDid))
+        .and(DATASET_VERSION.NAME.eq(versionName))
+        .fetchOneInto(classOf[DatasetVersion])
+
+      if (datasetVersion == null) {
+        throw new FileNotFoundException(s"Dataset $originalPath not found.")
+      }
+      (dataset.getRepositoryName, datasetVersion.getVersionHash)
+    }
+
+  /**
+    * Resolves a dataset version path to its LakeFS repository name and commit hash.
+    * Expected format: /datasets/ownerEmail/datasetName/versionName
+    *   e.g. /datasets/bob@texera.com/iris-species/v1
+    *
+    * The dataset counterpart of [[resolveModelVersion]]: it addresses a whole version
+    * rather than a file inside it, because a mount exposes the entire version.
+    *
+    * @param datasetPath the dataset version path to resolve
+    * @throws java.io.FileNotFoundException if the dataset or version cannot be found, or the
+    *                                       path is not a well-formed dataset version path
+    * @return (repositoryName, versionHash) of the dataset version
+    */
+  def resolveDatasetVersion(datasetPath: String): (String, String) =
+    resolveVersionPath(datasetPath, ResourceType.Datasets, fetchDatasetVersion)
 
   /**
     * Attempts to resolve a model file path to a URI.
@@ -249,16 +280,27 @@ object FileResolver {
     *                                       path is not a well-formed model version path
     * @return (repositoryName, versionHash) of the model version
     */
-  def resolveModelVersion(modelPath: String): (String, String) = {
-    val path = Paths.get(modelPath)
+  def resolveModelVersion(modelPath: String): (String, String) =
+    resolveVersionPath(modelPath, ResourceType.Models, fetchModelVersion)
+
+  /**
+    * Shared shape of [[resolveModelVersion]] and [[resolveDatasetVersion]]: split
+    * /<resourceType>/ownerEmail/name/versionName and hand the three parts to `fetch`.
+    */
+  private def resolveVersionPath(
+      versionPath: String,
+      resourceType: ResourceType.Value,
+      fetch: (String, String, String, String) => (String, String)
+  ): (String, String) = {
+    val path = Paths.get(versionPath)
     val segments = (0 until path.getNameCount).map(path.getName(_).toString)
-    if (segments.length < 4 || segments(0) != ResourceType.Models.toString) {
+    if (segments.length < 4 || segments(0) != resourceType.toString) {
       throw new FileNotFoundException(
-        s"Model version path $modelPath is invalid; " +
-          s"expected /${ResourceType.Models}/ownerEmail/modelName/versionName."
+        s"Version path $versionPath is invalid; " +
+          s"expected /$resourceType/ownerEmail/name/versionName."
       )
     }
-    fetchModelVersion(segments(1), segments(2), segments(3), modelPath)
+    fetch(segments(1), segments(2), segments(3), versionPath)
   }
 
   /**

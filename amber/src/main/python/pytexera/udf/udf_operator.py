@@ -26,23 +26,31 @@ from core.models.schema.attribute_type import AttributeType, FROM_STRING_PARSER_
 from loguru import logger
 
 
-class UiParameterType(Enum):
-    """UI-only parameter kinds, for values that are not tuple attribute types.
+class Resource(Enum):
+    """A Texera resource a parameter's value names, rather than free text.
 
-    MODELS asks the property panel for a model version instead of free text. The
-    value handed to the UDF is the local directory that version is mounted at, so
-    the code opens files under it exactly as it would any other directory. Which
-    version that is, and mounting it, are settled before the worker starts.
+    Passed as `value=` to mark where the value comes from:
+
+        self.UiParameter("IRIS_MODEL", AttributeType.STRING, value=Resource.MODEL)
+
+    The parameter is still an ordinary string; only its editor differs — the
+    property panel offers a browser for the resource instead of a text box, and
+    what it stores is the chosen version's path. What the UDF receives is the
+    local directory that version is mounted at, so the code opens files under it
+    exactly as it would any other directory. Choosing the version and mounting it
+    are settled when the workflow runs, not while it is being edited.
     """
 
-    MODELS = "models"
+    MODEL = "model"
+    DATASET = "dataset"
 
 
 @dataclass(frozen=True)
 class _UiParameterValue:
     name: str
-    type: Union[AttributeType, UiParameterType]
+    type: AttributeType
     value: Any
+    resource: Optional[Resource] = None
 
 
 class _UiParameterSupport:
@@ -117,6 +125,10 @@ class _UiParameterSupport:
         """
         Return the current UI parameter value parsed as attr_type.
 
+        Pass `value=Resource.MODEL` or `value=Resource.DATASET` to have the
+        property panel offer that resource's browser instead of a text box; the
+        parameter stays an ordinary string, holding the mount path at run time.
+
         Re-reading the same name with the same type is idempotent. Reusing a
         name with a different type is rejected because the parsed value would be
         ambiguous.
@@ -125,6 +137,8 @@ class _UiParameterSupport:
             if attr_type is not None:
                 raise TypeError("UiParameter.type was provided multiple times.")
             attr_type = kwargs.pop("type")
+
+        resource = kwargs.pop("value", None)
 
         if kwargs:
             unexpected_arguments = ", ".join(sorted(kwargs))
@@ -136,11 +150,23 @@ class _UiParameterSupport:
         if attr_type is None:
             raise TypeError("UiParameter.type is required.")
 
-        if not isinstance(attr_type, (AttributeType, UiParameterType)):
+        if not isinstance(attr_type, AttributeType):
             raise TypeError(
-                f"UiParameter.type must be an AttributeType or UiParameterType, "
-                f"got {attr_type!r}."
+                f"UiParameter.type must be an AttributeType, got {attr_type!r}."
             )
+
+        if resource is not None:
+            if not isinstance(resource, Resource):
+                raise TypeError(
+                    f"UiParameter.value must be a Resource, got {resource!r}."
+                )
+            # A resource is named by its path, so the parameter has to be a string;
+            # any other type would fail to parse the path it is handed.
+            if attr_type is not AttributeType.STRING:
+                raise TypeError(
+                    f"UiParameter '{name}' names a {resource.name} resource, so its "
+                    f"type must be AttributeType.STRING, not {attr_type.name}."
+                )
 
         self._ensure_ui_parameter_state()
         existing_type = self._ui_parameter_name_types.get(name)
@@ -165,15 +191,11 @@ class _UiParameterSupport:
             name=name,
             type=attr_type,
             value=self._parse(raw_value, attr_type),
+            resource=resource,
         )
 
     @staticmethod
-    def _parse(value: Any, attr_type: Union[AttributeType, UiParameterType]) -> Any:
-        # A models parameter is already a filesystem path by the time it arrives;
-        # there is nothing to parse and no attribute type to parse it as.
-        if isinstance(attr_type, UiParameterType):
-            return value
-
+    def _parse(value: Any, attr_type: AttributeType) -> Any:
         if attr_type in _UiParameterSupport._unsupported_ui_parameter_types:
             raise ValueError(
                 f"UiParameter does not support {attr_type.name} values. "

@@ -191,7 +191,7 @@ export function buildModelUsageSnippet(ctx: ModelSnippetContext): string {
     "        # Declaring the parameter puts a row in this operator's property panel; pick",
     "        # the model version there. The value is the directory it is mounted at --",
     "        # read-only and already local, so no download is needed.",
-    `        ${variable} = self.UiParameter("${variable}", UiParameterType.MODELS).value`,
+    `        ${variable} = self.UiParameter("${variable}", AttributeType.STRING, value=Resource.MODEL).value`,
   ];
 
   if (!usesDirectory) {

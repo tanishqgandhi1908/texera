@@ -391,7 +391,8 @@ export function registerModelTools(server: McpServer, context: McpContext): void
         `Created version "${created.modelVersion.name}" (mvid ${created.modelVersion.mvid}) of model ${args.mid}.\n` +
         `Model path: ${modelVersionRootPath(entry.ownerEmail, entry.model.name, created.modelVersion.name)}\n` +
         `Mount locator: ${modelLocator(entry.model, created.modelVersion)}\n` +
-        `Next: declare self.UiParameter("NAME", UiParameterType.MODELS) in a Python UDF and set that ` +
+        `Next: declare self.UiParameter("NAME", AttributeType.STRING, value=Resource.MODEL) in a ` +
+        `Python UDF and set that ` +
         `row's value in its uiParameters property to this path. ` +
         `It is mounted into the computing unit automatically when the workflow runs.`
       );

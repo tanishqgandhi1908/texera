@@ -43,27 +43,35 @@ const ARGUMENT_DELIMITER_NODES = new Set(["(", ")", ","]);
 
 const UI_PARAMETER_CALLEE = ["self", "UiParameter"];
 const ATTRIBUTE_TYPE_RECEIVER = "AttributeType";
-// UI-only parameter kinds, declared as UiParameterType.X rather than AttributeType.X
-// because they are not tuple attribute types. Keep in sync with pytexera's
-// UiParameterType and with PythonUdfUiParameterSupport on the backend.
-const UI_PARAMETER_TYPE_RECEIVER = "UiParameterType";
-export const MODELS_INPUT_TYPE = "models";
+// A Texera resource the value names, declared as `value=Resource.X`. The parameter stays an
+// ordinary string; only its editor differs. Keep in sync with pytexera's Resource and with
+// PythonUdfUiParameterSupport on the backend.
+const RESOURCE_RECEIVER = "Resource";
+export const MODEL_INPUT_TYPE = "model";
+export const DATASET_INPUT_TYPE = "dataset";
+const RESOURCE_INPUT_TYPES_BY_TOKEN: Readonly<Record<string, string>> = {
+  MODEL: MODEL_INPUT_TYPE,
+  DATASET: DATASET_INPUT_TYPE,
+};
 const ARGUMENT_NAME = "name";
 const ARGUMENT_TYPE = "type";
 const ARGUMENT_ATTR_TYPE = "attr_type";
+const ARGUMENT_VALUE = "value";
+// `value` is keyword-only: positionally, the third argument would be ambiguous with the
+// value itself, and pytexera accepts it only as a keyword too.
 const POSITIONAL_ARGUMENT_KEYS = [ARGUMENT_NAME, ARGUMENT_TYPE] as const;
 
 type ParserSyntaxNode = ReturnType<typeof parser.parse>["topNode"];
 type ParsedArgument = Readonly<{ key?: string; value: ParserSyntaxNode }>;
-type ParsedParameterType = Readonly<{ attributeType: AttributeType; inputType?: string }>;
 type UiParameterArgument =
   | Readonly<{ kind: typeof ARGUMENT_NAME; value: string }>
-  | Readonly<{ kind: typeof ARGUMENT_TYPE; value: ParsedParameterType }>;
+  | Readonly<{ kind: typeof ARGUMENT_TYPE; value: AttributeType }>
+  | Readonly<{ kind: typeof ARGUMENT_VALUE; value: string }>;
 
 /**
  * UI parameter row inferred from Python code, with backend-compatible attribute metadata and an
- * editable value. `inputType` names a UI-only kind — today only "models", whose value is picked
- * from the model browser rather than typed.
+ * editable value. `inputType` names the resource the value comes from — "model" or "dataset" —
+ * whose value is picked from that resource's browser rather than typed.
  */
 export type UiUdfParameter = Readonly<{ attribute: SchemaAttribute; value: string; inputType?: string }>;
 
@@ -143,18 +151,19 @@ function readCall(call: ParserSyntaxNode, code: string): UiUdfParameter | undefi
   if (!argumentList || !isMemberPath(callee, code, UI_PARAMETER_CALLEE)) return undefined;
 
   let attributeName: string | undefined;
-  let parameterType: ParsedParameterType | undefined;
+  let attributeType: AttributeType | undefined;
+  let inputType: string | undefined;
   const uiParameterArguments = readUiParameterArguments(argumentList, code);
   if (!uiParameterArguments) return undefined;
 
   for (const argument of uiParameterArguments) {
     if (argument.kind === ARGUMENT_NAME && !attributeName) attributeName = argument.value;
-    else if (argument.kind === ARGUMENT_TYPE && !parameterType) parameterType = argument.value;
+    else if (argument.kind === ARGUMENT_TYPE && !attributeType) attributeType = argument.value;
+    else if (argument.kind === ARGUMENT_VALUE && !inputType) inputType = argument.value;
     else return undefined;
   }
 
-  if (!attributeName || !parameterType) return undefined;
-  const { attributeType, inputType } = parameterType;
+  if (!attributeName || !attributeType) return undefined;
   return { attribute: { attributeName, attributeType }, value: "", ...(inputType ? { inputType } : {}) };
 }
 
@@ -186,8 +195,12 @@ function readUiParameterArgument(
     return attributeName ? { kind: ARGUMENT_NAME, value: attributeName } : undefined;
   }
   if (key === ARGUMENT_TYPE || key === ARGUMENT_ATTR_TYPE) {
-    const parameterType = readType(value, code);
-    return parameterType ? { kind: ARGUMENT_TYPE, value: parameterType } : undefined;
+    const attributeType = readType(value, code);
+    return attributeType ? { kind: ARGUMENT_TYPE, value: attributeType } : undefined;
+  }
+  if (key === ARGUMENT_VALUE) {
+    const inputType = readResource(value, code);
+    return inputType ? { kind: ARGUMENT_VALUE, value: inputType } : undefined;
   }
   return undefined;
 }
@@ -225,19 +238,25 @@ function readName(value: ParserSyntaxNode, code: string): string | undefined {
   return name || undefined;
 }
 
-function readType(value: ParserSyntaxNode, code: string): ParsedParameterType | undefined {
-  const parts = readMemberPath(value, code);
-  if (parts?.length !== 2) return undefined;
-  const token = parts[1]?.toUpperCase();
-  if (!token) return undefined;
+function readType(value: ParserSyntaxNode, code: string): AttributeType | undefined {
+  return readEnumMember(value, code, ATTRIBUTE_TYPE_RECEIVER, ATTRIBUTE_TYPES_BY_TOKEN);
+}
 
-  if (parts[0] === UI_PARAMETER_TYPE_RECEIVER) {
-    // A models parameter still stores a string; only the editor differs.
-    return token === "MODELS" ? { attributeType: "string", inputType: MODELS_INPUT_TYPE } : undefined;
-  }
-  if (parts[0] !== ATTRIBUTE_TYPE_RECEIVER) return undefined;
-  const attributeType = ATTRIBUTE_TYPES_BY_TOKEN[token];
-  return attributeType ? { attributeType } : undefined;
+function readResource(value: ParserSyntaxNode, code: string): string | undefined {
+  return readEnumMember(value, code, RESOURCE_RECEIVER, RESOURCE_INPUT_TYPES_BY_TOKEN);
+}
+
+/** Reads `Receiver.MEMBER` and maps MEMBER through `membersByToken`. */
+function readEnumMember<T extends string>(
+  value: ParserSyntaxNode,
+  code: string,
+  receiver: string,
+  membersByToken: Readonly<Record<string, T>>
+): T | undefined {
+  const parts = readMemberPath(value, code);
+  if (parts?.length !== 2 || parts[0] !== receiver) return undefined;
+  const token = parts[1]?.toUpperCase();
+  return token ? membersByToken[token] : undefined;
 }
 
 function isMemberPath(node: ParserSyntaxNode | null, code: string, expectedParts: string[]): boolean {

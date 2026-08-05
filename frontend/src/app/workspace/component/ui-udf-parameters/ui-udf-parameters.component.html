@@ -34,18 +34,9 @@
       <div
         class="field-cell"
         *ngFor="let column of fieldColumns">
-        <!-- A models parameter stores a string, so its attribute type reads "string"; the
-             column is read-only anyway, so show the kind the row actually is. -->
-        <span
-          *ngIf="showsKindInsteadOfType(column, parameter); else formlyColumn"
-          class="ui-udf-parameter-kind"
-          >{{ parameter.inputType }}</span
-        >
-        <ng-template #formlyColumn>
-          <formly-field
-            *ngIf="getColumnField(rowField, column) as columnField"
-            [field]="columnField"></formly-field>
-        </ng-template>
+        <formly-field
+          *ngIf="getColumnField(rowField, column) as columnField"
+          [field]="columnField"></formly-field>
       </div>
     </ng-container>
   </div>

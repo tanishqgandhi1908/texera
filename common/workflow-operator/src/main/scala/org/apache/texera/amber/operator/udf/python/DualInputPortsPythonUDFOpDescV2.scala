@@ -93,8 +93,8 @@ class DualInputPortsPythonUDFOpDescV2 extends LogicalOp {
   @JsonSchemaTitle("UI parameters")
   @JsonPropertyDescription(
     "Values for the self.UiParameter(...) calls declared in the code above. Rows appear as you " +
-      "declare them; a parameter of type models is filled from the model picker and reaches your " +
-      "code as the local path that model version is mounted at."
+      "declare them; a parameter that names a model or dataset is filled from that resource's " +
+      "browser and reaches your code as the local path that version is mounted at."
   )
   var uiParameters: List[UiUDFParameter] = List()
 

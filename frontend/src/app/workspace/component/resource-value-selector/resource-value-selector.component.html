@@ -19,13 +19,13 @@
 
 <button
   nz-button
-  class="model-value-select"
+  class="resource-value-select"
   [disabled]="formControl.disabled"
   nz-tooltip
-  [nzTooltipTitle]="selectedPath || 'Choose a model version'"
-  (click)="openModelPicker()">
+  [nzTooltipTitle]="tooltip"
+  (click)="openPicker()">
   <i
     nz-icon
-    nzType="experiment"></i>
-  <span class="model-value-label">{{ label }}</span>
+    [nzType]="icon"></i>
+  <span class="resource-value-label">{{ label }}</span>
 </button>

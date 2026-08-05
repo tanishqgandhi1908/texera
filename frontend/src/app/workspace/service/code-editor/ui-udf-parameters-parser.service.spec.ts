@@ -18,6 +18,8 @@
  */
 
 import {
+  DATASET_INPUT_TYPE,
+  MODEL_INPUT_TYPE,
   UiUdfParametersParseError,
   UiUdfParametersParserService,
   type UiUdfParameter,
@@ -54,6 +56,41 @@ describe("UiUdfParametersParserService", () => {
         parameter("created_at", "timestamp"),
         parameter("alias", "integer"),
       ]
+    );
+  });
+
+  it("should read the resource a value names from the value keyword argument", () => {
+    expectParsed(
+      service,
+      `
+        self.UiParameter("IRIS_MODEL", AttributeType.STRING, value=Resource.MODEL)
+        self.UiParameter("IRIS_DATA", AttributeType.STRING, value=Resource.DATASET)
+        self.UiParameter(name="mixed", type=AttributeType.STRING, value=Resource.MODEL)
+      `,
+      [
+        resourceParameter("IRIS_MODEL", MODEL_INPUT_TYPE),
+        resourceParameter("IRIS_DATA", DATASET_INPUT_TYPE),
+        resourceParameter("mixed", MODEL_INPUT_TYPE),
+      ]
+    );
+  });
+
+  it("should leave a parameter without a resource as ordinary text", () => {
+    // No inputType at all, rather than an empty one: the property panel keys the editor
+    // off its presence.
+    expectParsed(service, 'self.UiParameter("plain", AttributeType.STRING)', [parameter("plain", "string")]);
+  });
+
+  it("should ignore an unrecognised or malformed resource", () => {
+    expectParsed(
+      service,
+      `
+        self.UiParameter("unknown_kind", AttributeType.STRING, value=Resource.NOTEBOOK)
+        self.UiParameter("not_a_resource", AttributeType.STRING, value=OtherEnum.MODEL)
+        self.UiParameter("literal", AttributeType.STRING, value="model")
+        self.UiParameter("valid", AttributeType.STRING, value=Resource.MODEL)
+      `,
+      [resourceParameter("valid", MODEL_INPUT_TYPE)]
     );
   });
 
@@ -231,4 +268,8 @@ ${openStatements}
 
 function parameter(attributeName: string, attributeType: UiUdfParameter["attribute"]["attributeType"]): UiUdfParameter {
   return { attribute: { attributeName, attributeType }, value: "" };
+}
+
+function resourceParameter(attributeName: string, inputType: string): UiUdfParameter {
+  return { attribute: { attributeName, attributeType: "string" }, value: "", inputType };
 }

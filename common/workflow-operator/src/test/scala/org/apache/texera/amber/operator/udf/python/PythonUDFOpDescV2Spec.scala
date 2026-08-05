@@ -241,13 +241,16 @@ class PythonUDFOpDescV2Spec extends AnyFlatSpec with Matchers {
     }
   }
 
-  private def modelsParameter(name: String, path: String): UiUDFParameter = {
+  private def resourceParameter(name: String, inputType: String, path: String): UiUDFParameter = {
     val parameter = new UiUDFParameter
     parameter.attribute = new Attribute(name, AttributeType.STRING)
-    parameter.inputType = PythonUdfUiParameterSupport.ModelsInputType
+    parameter.inputType = inputType
     parameter.value = path
     parameter
   }
+
+  private def modelsParameter(name: String, path: String): UiUDFParameter =
+    resourceParameter(name, PythonUdfUiParameterSupport.ModelInputType, path)
 
   "PythonUDFOpDescV2 models parameters" should
     "carry no mounted models when none are declared" in {
@@ -272,12 +275,39 @@ class PythonUDFOpDescV2Spec extends AnyFlatSpec with Matchers {
     }
   }
 
-  it should "reject a models parameter with no model selected" in {
+  it should "reject a resource parameter with nothing selected" in {
+    for (
+      (inputType, expected) <- Seq(
+        PythonUdfUiParameterSupport.ModelInputType -> "No model selected",
+        PythonUdfUiParameterSupport.DatasetInputType -> "No dataset selected"
+      )
+    ) withClue(s"inputType '$inputType': ") {
+      val d = new PythonUDFOpDescV2
+      d.code = pythonUdfClass
+      d.uiParameters = List(resourceParameter("RESOURCE", inputType, "   "))
+      val ex = intercept[RuntimeException] { d.getPhysicalOp(workflowId, executionId) }
+      ex.getMessage should include(expected)
+    }
+  }
+
+  it should "defer a dataset parameter the same way it defers a model one" in {
     val d = new PythonUDFOpDescV2
     d.code = pythonUdfClass
-    d.uiParameters = List(modelsParameter("MODEL", "   "))
-    val ex = intercept[RuntimeException] { d.getPhysicalOp(workflowId, executionId) }
-    ex.getMessage should include("No model selected")
+    d.uiParameters = List(
+      resourceParameter(
+        "IRIS_DATA",
+        PythonUdfUiParameterSupport.DatasetInputType,
+        "/datasets/bob@texera.com/iris-species/v1"
+      )
+    )
+
+    val physical = d.getPhysicalOp(workflowId, executionId)
+    physical.executionTimeBinding should not be empty
+    physical.opExecInitInfo match {
+      case OpExecWithCode(code, _) =>
+        code should include(encoded("/datasets/bob@texera.com/iris-species/v1"))
+      case other => fail(s"expected OpExecWithCode, got $other")
+    }
   }
 
   // The rest of this group is about *when* a models parameter is resolved. Compilation
