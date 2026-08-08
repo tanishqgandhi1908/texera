@@ -516,8 +516,9 @@
       <nz-card class="settings-general-card">
         <h3 class="settings-card-title">Load this model in a UDF</h3>
         <p class="settings-hint">
-          Declare <code>{{ modelVariable }}</code> as a model variable in the Python UDF's property panel. The model is
-          mounted read-only in the computing unit, so the variable is an ordinary filesystem path.
+          Paste this into a Python UDF. The <code>{{ modelVariable }}</code> parameter it declares appears as a row in
+          the operator's property panel — pick a version there, and it reaches your code as the local directory that
+          version is mounted at.
         </p>
         <p class="settings-hint">
           Generated from this model's framework and format, targeting
