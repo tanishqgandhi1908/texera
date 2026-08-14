@@ -59,8 +59,12 @@ object PveManager extends LazyLogging {
 
   private val SafePveName = "^[A-Za-z0-9._-]+$".r
 
+  // 160 matches virtual_environments.name, widened so that "pve-for-model-<model name>"
+  // fits a model name of the full 128 characters.
+  private val MaxPveNameLength = 160
+
   def isValidPveName(name: String): Boolean =
-    name != null && name.length <= 128 && SafePveName.pattern.matcher(name).matches()
+    name != null && name.length <= MaxPveNameLength && SafePveName.pattern.matcher(name).matches()
 
   private def cuidDir(cuid: Int, pveName: String): Path = {
     VenvRoot.resolve(cuid.toString).resolve(pveName)

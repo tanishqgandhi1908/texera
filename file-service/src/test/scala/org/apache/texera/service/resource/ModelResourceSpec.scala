@@ -135,6 +135,81 @@ class ModelResourceSpec
     created.model.getFramework shouldEqual "pytorch"
   }
 
+  // ===========================================================================
+  // createModel: the model's Python environment
+  // ===========================================================================
+
+  /** The packages of the environment provisioned for `modelName`, if one was. */
+  private def provisionedEnvironment(modelName: String): Option[String] = {
+    import org.apache.texera.dao.jooq.generated.tables.VirtualEnvironments.VIRTUAL_ENVIRONMENTS
+    Option(
+      getDSLContext
+        .select(VIRTUAL_ENVIRONMENTS.PACKAGES)
+        .from(VIRTUAL_ENVIRONMENTS)
+        .where(VIRTUAL_ENVIRONMENTS.NAME.eq(s"pve-for-model-$modelName"))
+        .fetchOne()
+    ).map(_.value1().data())
+  }
+
+  private def createModelWithFramework(
+      modelName: String,
+      framework: String,
+      frameworkVersion: String
+  ) =
+    modelResource.createModel(
+      ModelResource.CreateModelRequest(
+        modelName = modelName,
+        modelDescription = "environment provisioning",
+        isModelPublic = false,
+        isModelDownloadable = true,
+        framework = framework,
+        format = null,
+        frameworkVersion = frameworkVersion
+      ),
+      sessionUser
+    )
+
+  it should "record the framework version and provision a matching environment" in {
+    val created = createModelWithFramework("sklearn-versioned-model", "sklearn", "1.5.0")
+
+    created.model.getFrameworkVersion shouldEqual "1.5.0"
+    // sklearn is a deprecated stub on PyPI; the environment must pin the real distribution.
+    provisionedEnvironment("sklearn-versioned-model") shouldEqual Some(
+      """{"scikit-learn": "==1.5.0"}"""
+    )
+  }
+
+  it should "provision pytorch's environment under its PyPI name" in {
+    createModelWithFramework("torch-versioned-model", "pytorch", "2.13.0+cpu")
+
+    provisionedEnvironment("torch-versioned-model") shouldEqual Some(
+      """{"torch": "==2.13.0+cpu"}"""
+    )
+  }
+
+  it should "provision no environment when the framework version is absent" in {
+    val created = createModelWithFramework("sklearn-unversioned-model", "sklearn", null)
+
+    created.model.getFrameworkVersion shouldBe null
+    provisionedEnvironment("sklearn-unversioned-model") shouldBe None
+  }
+
+  it should "provision no environment for a framework with no known package" in {
+    createModelWithFramework("other-framework-model", "other", "1.0.0")
+
+    provisionedEnvironment("other-framework-model") shouldBe None
+  }
+
+  it should "reject a framework version it could not put on a pip command line" in {
+    val ex = intercept[BadRequestException] {
+      createModelWithFramework("injected-version-model", "sklearn", "1.5.0; rm -rf /")
+    }
+    assertStatus(ex, 400)
+
+    // the model itself must not have been created
+    modelDao.fetchByName("injected-version-model").asScala shouldBe empty
+  }
+
   it should "refuse to create a model if the user already has one with the same name" in {
     val request = ModelResource.CreateModelRequest(
       modelName = "test-model",

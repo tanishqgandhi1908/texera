@@ -19,6 +19,8 @@
 
 package org.apache.texera.service.resource
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import com.typesafe.scalalogging.LazyLogging
 import io.dropwizard.auth.Auth
 import jakarta.annotation.security.{PermitAll, RolesAllowed}
@@ -38,6 +40,7 @@ import org.apache.texera.dao.jooq.generated.tables.ModelUploadSessionPart.MODEL_
 import org.apache.texera.dao.jooq.generated.tables.ModelUserAccess.MODEL_USER_ACCESS
 import org.apache.texera.dao.jooq.generated.tables.ModelVersion.MODEL_VERSION
 import org.apache.texera.dao.jooq.generated.tables.User.USER
+import org.apache.texera.dao.jooq.generated.tables.VirtualEnvironments.VIRTUAL_ENVIRONMENTS
 import org.apache.texera.dao.jooq.generated.tables.daos.{
   ModelDao,
   ModelUserAccessDao,
@@ -62,6 +65,7 @@ import org.apache.texera.service.util.S3StorageClient.{
   PHYSICAL_ADDRESS_EXPIRATION_TIME_HRS
 }
 import org.apache.texera.service.util.LakeFSExceptionHandler.withLakeFSErrorHandling
+import org.jooq.JSONB
 import org.jooq.exception.DataAccessException
 import org.jooq.impl.DSL
 import org.jooq.impl.DSL.{inline => inl}
@@ -108,6 +112,11 @@ object ModelResource {
     SqlServer
       .getInstance()
       .createDSLContext()
+
+  // Serialises the model environment's package map into the JSONB column shape
+  // `virtual_environments.packages` uses.
+  private val objectMapper: ObjectMapper =
+    new ObjectMapper().registerModule(DefaultScalaModule)
 
   private def singleFileUploadMaxBytes(defaultMiB: Long = 2048L): Long =
     SiteSettings.getLong("model_single_file_upload_max_size_mib", defaultMiB) * 1024L * 1024L
@@ -163,14 +172,19 @@ object ModelResource {
       isModelPublic: Boolean,
       isModelDownloadable: Boolean,
       framework: String,
-      format: String
+      format: String,
+      frameworkVersion: String = null
   )
 
   case class ModelDescriptionModification(mid: Integer, description: String)
 
   case class ModelNameModification(mid: Integer, name: String)
 
-  case class ModelFrameworkModification(mid: Integer, framework: String)
+  case class ModelFrameworkModification(
+      mid: Integer,
+      framework: String,
+      frameworkVersion: String = null
+  )
 
   case class ModelFormatModification(mid: Integer, format: String)
 
@@ -217,6 +231,20 @@ class ModelResource extends LazyLogging {
     if (!allowed.contains(value)) {
       throw new BadRequestException(
         s"Unsupported $field '$value'. Supported values: ${allowed.toList.sorted.mkString(", ")}."
+      )
+    }
+  }
+
+  /**
+    * Rejects a framework version the server cannot put on a pip command line, so that a
+    * model never records a version its environment could not be pinned to.
+    *
+    * @throws jakarta.ws.rs.BadRequestException if the value is not a plausible version
+    */
+  private def validateFrameworkVersion(version: String): Unit = {
+    if (!ModelEnvironment.isValidVersion(version)) {
+      throw new BadRequestException(
+        s"Invalid framework version '$version'. Expected a version such as 1.5.0 or 2.13.0+cpu."
       )
     }
   }
@@ -293,22 +321,25 @@ class ModelResource extends LazyLogging {
       @Auth user: SessionUser
   ): DashboardModel = {
 
-    withTransaction(context) { ctx =>
+    val modelName = request.modelName
+    validateModelName(modelName)
+
+    val framework =
+      Option(request.framework).map(_.trim).filter(_.nonEmpty).getOrElse(DEFAULT_FRAMEWORK)
+    validateLabel("framework", framework, SUPPORTED_FRAMEWORKS)
+    val format = Option(request.format).map(_.trim).filter(_.nonEmpty)
+    format.foreach(validateLabel("format", _, SUPPORTED_FORMATS))
+    val frameworkVersion =
+      Option(request.frameworkVersion).map(_.trim).filter(_.nonEmpty)
+    frameworkVersion.foreach(validateFrameworkVersion)
+
+    val dashboardModel = withTransaction(context) { ctx =>
       val uid = user.getUid
       val modelUserAccessDao: ModelUserAccessDao = new ModelUserAccessDao(ctx.configuration())
 
-      val modelName = request.modelName
       val modelDescription = request.modelDescription
       val isModelPublic = request.isModelPublic
       val isModelDownloadable = request.isModelDownloadable
-
-      validateModelName(modelName)
-
-      val framework =
-        Option(request.framework).map(_.trim).filter(_.nonEmpty).getOrElse(DEFAULT_FRAMEWORK)
-      validateLabel("framework", framework, SUPPORTED_FRAMEWORKS)
-      val format = Option(request.format).map(_.trim).filter(_.nonEmpty)
-      format.foreach(validateLabel("format", _, SUPPORTED_FORMATS))
 
       // Check if a model with the same name already exists
       val duplicateExists = ctx.fetchExists(
@@ -330,6 +361,7 @@ class ModelResource extends LazyLogging {
       model.setOwnerUid(uid)
       model.setFramework(framework)
       model.setFormat(format.orNull)
+      model.setFrameworkVersion(frameworkVersion.orNull)
 
       // insert record and get created model with mid
       val createdModel = failOnDuplicateModelName {
@@ -380,6 +412,50 @@ class ModelResource extends LazyLogging {
         isOwner = true,
         0
       )
+    }
+
+    // Provision the model's Python environment specification. Deliberately after the
+    // transaction has committed and best-effort: a user who cannot get an environment
+    // still gets their model, and a failure here would otherwise abort the transaction
+    // that created it.
+    provisionModelEnvironment(user.getUid, modelName, framework, frameworkVersion)
+
+    dashboardModel
+  }
+
+  /**
+    * Records a `virtual_environments` row named after the model, pinned to the framework
+    * version it was trained against. Does nothing when the framework/version pair names no
+    * installable package, or when the user already has an environment by that name.
+    *
+    * Never throws: provisioning an environment is a convenience layered on model creation,
+    * not part of it.
+    */
+  private def provisionModelEnvironment(
+      uid: Integer,
+      modelName: String,
+      framework: String,
+      frameworkVersion: Option[String]
+  ): Unit = {
+    val packages = ModelEnvironment.packagesFor(framework, frameworkVersion.orNull)
+    if (packages.isEmpty) return
+
+    try {
+      val packagesJson = objectMapper.writeValueAsString(packages)
+      context
+        .insertInto(VIRTUAL_ENVIRONMENTS)
+        .set(VIRTUAL_ENVIRONMENTS.UID, uid)
+        .set(VIRTUAL_ENVIRONMENTS.NAME, ModelEnvironment.pveName(modelName))
+        .set(VIRTUAL_ENVIRONMENTS.PACKAGES, JSONB.valueOf(packagesJson))
+        .onConflict(VIRTUAL_ENVIRONMENTS.UID, VIRTUAL_ENVIRONMENTS.NAME)
+        .doNothing()
+        .execute()
+    } catch {
+      case e: Exception =>
+        logger.warn(
+          s"Failed to provision the Python environment for model '$modelName'; " +
+            s"the model was still created. Cause: ${e.getMessage}"
+        )
     }
   }
 
@@ -453,8 +529,14 @@ class ModelResource extends LazyLogging {
       }
 
       validateLabel("framework", modificator.framework, SUPPORTED_FRAMEWORKS)
+      // Framework and version move together: a version left over from the previous
+      // framework would name a package that does not exist.
+      val frameworkVersion =
+        Option(modificator.frameworkVersion).map(_.trim).filter(_.nonEmpty)
+      frameworkVersion.foreach(validateFrameworkVersion)
 
       model.setFramework(modificator.framework)
+      model.setFrameworkVersion(frameworkVersion.orNull)
       modelDao.update(model)
       Response.ok().build()
     }

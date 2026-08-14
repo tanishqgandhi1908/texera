@@ -244,7 +244,9 @@ CREATE TABLE IF NOT EXISTS virtual_environments
 (
     veid     SERIAL PRIMARY KEY,
     uid      INT           NOT NULL,
-    name     VARCHAR(128)  NOT NULL,
+    -- Wide enough for "pve-for-model-<model name>", the environment a model provisions
+    -- on creation, since a model name may itself be 128 characters.
+    name     VARCHAR(160)  NOT NULL,
     packages JSONB         NOT NULL DEFAULT '{}'::jsonb,
     FOREIGN KEY (uid) REFERENCES "user"(uid) ON DELETE CASCADE,
     UNIQUE (uid, name)
@@ -379,6 +381,8 @@ CREATE TABLE IF NOT EXISTS model
     cover_image     varchar(255),
     framework       VARCHAR(32),
     format          VARCHAR(32),
+    -- Version of `framework` the model was trained against, e.g. "1.5.0".
+    framework_version VARCHAR(32),
     FOREIGN KEY (owner_uid) REFERENCES "user"(uid) ON DELETE CASCADE,
     UNIQUE (owner_uid, name)
     );
