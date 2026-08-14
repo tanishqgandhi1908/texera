@@ -244,8 +244,9 @@ CREATE TABLE IF NOT EXISTS virtual_environments
 (
     veid     SERIAL PRIMARY KEY,
     uid      INT           NOT NULL,
-    -- Wide enough for "pve-for-model-<model name>", the environment a model provisions
-    -- on creation, since a model name may itself be 128 characters.
+    -- 160 rather than 128 for the sake of the "pve-for-model-<model name>" environments an
+    -- earlier release provisioned automatically. Nothing creates those now, but the ones
+    -- already saved are ordinary environments and have to keep fitting.
     name     VARCHAR(160)  NOT NULL,
     packages JSONB         NOT NULL DEFAULT '{}'::jsonb,
     FOREIGN KEY (uid) REFERENCES "user"(uid) ON DELETE CASCADE,
@@ -381,9 +382,17 @@ CREATE TABLE IF NOT EXISTS model
     cover_image     varchar(255),
     framework       VARCHAR(32),
     format          VARCHAR(32),
-    -- Version of `framework` the model was trained against, e.g. "1.5.0".
+    -- Version of `framework` the model was trained against, e.g. "1.5.0". Descriptive only.
     framework_version VARCHAR(32),
+    -- The Python environment the model should be loaded in, chosen by its owner from the
+    -- environments they already have. NULL means the choice was skipped, and a UDF loading
+    -- the model runs on the Amber engine's default libraries.
+    veid            INT,
     FOREIGN KEY (owner_uid) REFERENCES "user"(uid) ON DELETE CASCADE,
+    -- SET NULL: deleting the environment drops the model back to the default libraries
+    -- rather than blocking the delete.
+    CONSTRAINT model_veid_fkey FOREIGN KEY (veid)
+        REFERENCES virtual_environments (veid) ON DELETE SET NULL,
     UNIQUE (owner_uid, name)
     );
 

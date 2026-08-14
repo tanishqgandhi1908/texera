@@ -20,25 +20,28 @@ import { Injectable } from "@angular/core";
 import { Observable, of, combineLatest } from "rxjs";
 import { catchError, map, switchMap, take } from "rxjs/operators";
 import { ComputingUnitStatusService } from "../../../common/service/computing-unit/computing-unit-status/computing-unit-status.service";
-import { modelPveName } from "../../../dashboard/service/user/model/model.service";
+import { ModelService } from "../../../dashboard/service/user/model/model.service";
 import { WorkflowPveService } from "./virtual-environment.service";
 
 /**
- * Creating a model also saves a Python environment pinned to the framework version it was
- * trained against (see ModelEnvironment on the server). That environment is only a saved
- * specification until someone installs it into a computing unit, and a UDF that loads the
- * model will otherwise run against whatever versions the default environment happens to
- * have.
+ * A model may name the saved Python environment it should be loaded in, chosen by its owner
+ * when the model was created. Naming one is a statement about library versions: many machine
+ * learning libraries only load what they wrote themselves, and a UDF running under the wrong
+ * versions fails at load time or, worse, quietly loads something different.
  *
- * This service answers the one question the property panel needs: for the model just
- * picked, is there a saved environment that the current computing unit does not have?
+ * The environment is only a saved specification until someone installs it into a computing
+ * unit. This service answers the one question the property panel needs: for the model just
+ * picked, does it name an environment that the current computing unit does not have?
+ *
+ * A model that names no environment was deliberately left on the engine's default libraries,
+ * and produces no hint.
  */
 
-/** Model name out of a `/models/ownerEmail/modelName/versionName` path. */
-export function modelNameFromPath(path: string): string | undefined {
+/** Owner email and model name out of a `/models/ownerEmail/modelName/versionName` path. */
+export function modelIdentityFromPath(path: string): { ownerEmail: string; modelName: string } | undefined {
   const parts = path.split("/").filter(part => part.length > 0);
   // [resourceType, ownerEmail, modelName, versionName]
-  return parts.length >= 4 ? parts[2] : undefined;
+  return parts.length >= 4 ? { ownerEmail: parts[1], modelName: parts[2] } : undefined;
 }
 
 export interface ModelPveHint {
@@ -51,23 +54,24 @@ export interface ModelPveHint {
 export class ModelPveHintService {
   constructor(
     private workflowPveService: WorkflowPveService,
-    private computingUnitStatusService: ComputingUnitStatusService
+    private computingUnitStatusService: ComputingUnitStatusService,
+    private modelService: ModelService
   ) {}
 
   /**
-   * Emits a hint when the picked model has a saved environment that is missing from the
-   * selected computing unit, and `undefined` in every other case — no model, no saved
-   * environment, no computing unit selected, or the environment is already installed.
+   * Emits a hint when the picked model names an environment that is missing from the
+   * selected computing unit, and `undefined` in every other case — no model, no computing
+   * unit selected, no environment chosen for the model, an environment the viewer does not
+   * have saved, or one that is already installed.
    *
    * Errors are swallowed into `undefined`: failing to look up an optional hint must never
    * disturb picking a model.
    */
   hintFor(selectedPath: string): Observable<ModelPveHint | undefined> {
-    const modelName = modelNameFromPath(selectedPath);
-    if (!modelName) {
+    const identity = modelIdentityFromPath(selectedPath);
+    if (!identity) {
       return of(undefined);
     }
-    const pveName = modelPveName(modelName);
 
     return this.computingUnitStatusService.getSelectedComputingUnit().pipe(
       take(1),
@@ -77,19 +81,31 @@ export class ModelPveHintService {
           return of(undefined);
         }
         return combineLatest([
+          this.modelService.retrieveAccessibleModels().pipe(catchError(() => of([]))),
           this.workflowPveService.listUserPves(cuid).pipe(catchError(() => of([]))),
           this.workflowPveService.fetchPVEs(cuid).pipe(catchError(() => of([]))),
         ]).pipe(
-          map(([savedPves, loadedPves]) => {
-            const isSaved = savedPves.some(pve => pve.name.trim() === pveName);
+          map(([models, savedPves, loadedPves]) => {
+            const veid = models.find(m => m.model.name === identity.modelName && m.ownerEmail === identity.ownerEmail)
+              ?.model.veid;
+            if (veid === undefined || veid === null) {
+              // No environment chosen: the default libraries are what the owner wanted.
+              return undefined;
+            }
+            // Resolved against the viewer's own environments. Someone else's environment is
+            // one they could neither see nor install, so there is nothing to suggest.
+            const pveName = savedPves.find(pve => pve.veid === veid)?.name?.trim();
+            if (!pveName) {
+              return undefined;
+            }
             const isLoaded = loadedPves.some(pve => pve.pveName.trim() === pveName);
-            return isSaved && !isLoaded
-              ? {
-                  modelName,
+            return isLoaded
+              ? undefined
+              : {
+                  modelName: identity.modelName,
                   pveName,
                   computingUnitName: unit?.computingUnit?.name ?? "the selected computing unit",
-                }
-              : undefined;
+                };
           })
         );
       }),

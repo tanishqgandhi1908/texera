@@ -55,6 +55,7 @@ import {
   validateFrameworkVersion,
   validateModelName,
 } from "../../../../service/user/model/model.service";
+import { WorkflowPveService } from "../../../../../workspace/service/virtual-environment/virtual-environment.service";
 import { USER_MODEL } from "../../../../../app-routing.constant";
 import {
   buildModelUsageSnippet,
@@ -143,6 +144,11 @@ export class ModelDetailComponent implements OnInit {
   public modelFramework: string | undefined;
   public modelFrameworkVersion: string | undefined;
   public modelFormat: string | undefined;
+  /** The saved environment the model is pointed at; undefined is the "skip" choice. */
+  public modelVeid: number | undefined;
+  /** The user's saved environments, for the picker. Empty until they can be listed. */
+  public availableEnvironments: { veid: number; name: string }[] = [];
+  public environmentsUnavailable: boolean = false;
   public userModelAccessLevel: "READ" | "WRITE" | "NONE" = "NONE";
   public ownerEmail: string = "";
   public isOwner: boolean = false;
@@ -217,7 +223,8 @@ export class ModelDetailComponent implements OnInit {
     private userService: UserService,
     private adminSettingsService: AdminSettingsService,
     private hubService: HubService,
-    private router: Router
+    private router: Router,
+    private workflowPveService: WorkflowPveService
   ) {
     this.userService
       .userChanged()
@@ -273,8 +280,10 @@ export class ModelDetailComponent implements OnInit {
           this.modelFramework = model.framework;
           this.modelFrameworkVersion = model.frameworkVersion;
           this.modelFormat = model.format;
+          this.modelVeid = model.veid;
           this.ownerEmail = dashboardModel.ownerEmail;
           this.isOwner = dashboardModel.isOwner;
+          this.loadEnvironments();
           if (model.coverImage) {
             this.loadCoverImageUrl(this.mid!);
           } else {
@@ -398,6 +407,56 @@ export class ModelDetailComponent implements OnInit {
         error: (err: unknown) => {
           this.modelFramework = previousFramework;
           this.modelFrameworkVersion = previousVersion;
+          this.notificationService.error(extractErrorMessage(err));
+        },
+      });
+  }
+
+  /**
+   * Saved environments are served by a computing unit, so with none running they cannot be
+   * listed. The picker then shows only what the model already points at, and says why.
+   */
+  private loadEnvironments(): void {
+    if (!this.userHasWriteAccess()) {
+      return;
+    }
+    this.workflowPveService
+      .listUserPves()
+      .pipe(untilDestroyed(this))
+      .subscribe({
+        next: records => {
+          this.availableEnvironments = records.map(r => ({ veid: r.veid, name: r.name }));
+          this.environmentsUnavailable = false;
+        },
+        error: () => {
+          this.availableEnvironments = [];
+          this.environmentsUnavailable = true;
+        },
+      });
+  }
+
+  /** Name of the environment the model points at, for display when the list is unavailable. */
+  get modelEnvironmentName(): string | undefined {
+    return this.availableEnvironments.find(env => env.veid === this.modelVeid)?.name;
+  }
+
+  onEnvironmentChange(veid: number | null): void {
+    const chosen = veid ?? undefined;
+    if (!this.mid || chosen === this.modelVeid) {
+      return;
+    }
+    const previous = this.modelVeid;
+    this.modelVeid = chosen;
+    this.modelService
+      .updateModelEnvironment(this.mid, chosen)
+      .pipe(untilDestroyed(this))
+      .subscribe({
+        next: () =>
+          this.notificationService.success(
+            chosen === undefined ? "Model will use the default libraries" : "Python environment updated"
+          ),
+        error: (err: unknown) => {
+          this.modelVeid = previous;
           this.notificationService.error(extractErrorMessage(err));
         },
       });

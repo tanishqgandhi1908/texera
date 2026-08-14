@@ -139,75 +139,168 @@ class ModelResourceSpec
   // createModel: the model's Python environment
   // ===========================================================================
 
-  /** The packages of the environment provisioned for `modelName`, if one was. */
-  private def provisionedEnvironment(modelName: String): Option[String] = {
+  /** Saves an environment for `uid` and returns its veid. */
+  private def saveEnvironment(uid: Integer, name: String): Integer = {
     import org.apache.texera.dao.jooq.generated.tables.VirtualEnvironments.VIRTUAL_ENVIRONMENTS
-    Option(
-      getDSLContext
-        .select(VIRTUAL_ENVIRONMENTS.PACKAGES)
-        .from(VIRTUAL_ENVIRONMENTS)
-        .where(VIRTUAL_ENVIRONMENTS.NAME.eq(s"pve-for-model-$modelName"))
-        .fetchOne()
-    ).map(_.value1().data())
+    getDSLContext
+      .insertInto(VIRTUAL_ENVIRONMENTS)
+      .set(VIRTUAL_ENVIRONMENTS.UID, uid)
+      .set(VIRTUAL_ENVIRONMENTS.NAME, name)
+      .returning(VIRTUAL_ENVIRONMENTS.VEID)
+      .fetchOne()
+      .getVeid
   }
 
-  private def createModelWithFramework(
+  /** The number of environments on record, to show that creating a model adds none. */
+  private def environmentCount(): Int = {
+    import org.apache.texera.dao.jooq.generated.tables.VirtualEnvironments.VIRTUAL_ENVIRONMENTS
+    getDSLContext.fetchCount(VIRTUAL_ENVIRONMENTS)
+  }
+
+  private def createModelWithEnvironment(
       modelName: String,
       framework: String,
-      frameworkVersion: String
+      frameworkVersion: String,
+      veid: Integer = null,
+      user: SessionUser = sessionUser
   ) =
     modelResource.createModel(
       ModelResource.CreateModelRequest(
         modelName = modelName,
-        modelDescription = "environment provisioning",
+        modelDescription = "environment selection",
         isModelPublic = false,
         isModelDownloadable = true,
         framework = framework,
         format = null,
-        frameworkVersion = frameworkVersion
+        frameworkVersion = frameworkVersion,
+        veid = veid
       ),
-      sessionUser
+      user
     )
 
-  it should "record the framework version and provision a matching environment" in {
-    val created = createModelWithFramework("sklearn-versioned-model", "sklearn", "1.5.0")
+  it should "record the framework version and the chosen environment" in {
+    val veid = saveEnvironment(ownerUser.getUid, "sklearn-15")
+    val created = createModelWithEnvironment("sklearn-versioned-model", "sklearn", "1.5.0", veid)
 
     created.model.getFrameworkVersion shouldEqual "1.5.0"
-    // sklearn is a deprecated stub on PyPI; the environment must pin the real distribution.
-    provisionedEnvironment("sklearn-versioned-model") shouldEqual Some(
-      """{"scikit-learn": "==1.5.0"}"""
-    )
+    created.model.getVeid shouldEqual veid
   }
 
-  it should "provision pytorch's environment under its PyPI name" in {
-    createModelWithFramework("torch-versioned-model", "pytorch", "2.13.0+cpu")
+  it should "create no environment of its own" in {
+    val before = environmentCount()
+    createModelWithEnvironment("no-provisioning-model", "sklearn", "1.5.0")
 
-    provisionedEnvironment("torch-versioned-model") shouldEqual Some(
-      """{"torch": "==2.13.0+cpu"}"""
-    )
+    // The version used to be turned into an environment named after the model. It is now
+    // descriptive only: the user picks an environment, or none.
+    environmentCount() shouldEqual before
   }
 
-  it should "provision no environment when the framework version is absent" in {
-    val created = createModelWithFramework("sklearn-unversioned-model", "sklearn", null)
+  it should "leave the environment unset when the choice is skipped" in {
+    val created = createModelWithEnvironment("skipped-environment-model", "sklearn", "1.5.0")
 
-    created.model.getFrameworkVersion shouldBe null
-    provisionedEnvironment("sklearn-unversioned-model") shouldBe None
+    created.model.getFrameworkVersion shouldEqual "1.5.0"
+    created.model.getVeid shouldBe null
   }
 
-  it should "provision no environment for a framework with no known package" in {
-    createModelWithFramework("other-framework-model", "other", "1.0.0")
+  it should "record a version without an environment, and an environment without a version" in {
+    createModelWithEnvironment(
+      "unversioned-model",
+      "sklearn",
+      null
+    ).model.getFrameworkVersion shouldBe null
 
-    provisionedEnvironment("other-framework-model") shouldBe None
+    val veid = saveEnvironment(ownerUser.getUid, "versionless-env")
+    createModelWithEnvironment(
+      "versionless-env-model",
+      "other",
+      null,
+      veid
+    ).model.getVeid shouldEqual veid
   }
 
-  it should "reject a framework version it could not put on a pip command line" in {
+  it should "reject an environment belonging to another user" in {
+    val foreignVeid = saveEnvironment(otherUser.getUid, "not-yours")
+
     val ex = intercept[BadRequestException] {
-      createModelWithFramework("injected-version-model", "sklearn", "1.5.0; rm -rf /")
+      createModelWithEnvironment("foreign-environment-model", "sklearn", "1.5.0", foreignVeid)
+    }
+    assertStatus(ex, 400)
+
+    modelDao.fetchByName("foreign-environment-model").asScala shouldBe empty
+  }
+
+  it should "reject an environment that does not exist" in {
+    val ex = intercept[BadRequestException] {
+      createModelWithEnvironment("unknown-environment-model", "sklearn", "1.5.0", Int.box(987654))
+    }
+    assertStatus(ex, 400)
+
+    modelDao.fetchByName("unknown-environment-model").asScala shouldBe empty
+  }
+
+  it should "reject an implausible framework version" in {
+    val ex = intercept[BadRequestException] {
+      createModelWithEnvironment("injected-version-model", "sklearn", "1.5.0; rm -rf /")
     }
     assertStatus(ex, 400)
 
     // the model itself must not have been created
     modelDao.fetchByName("injected-version-model").asScala shouldBe empty
+  }
+
+  // ===========================================================================
+  // updateModelEnvironment
+  // ===========================================================================
+
+  it should "change and clear a model's environment" in {
+    val first = saveEnvironment(ownerUser.getUid, "first-env")
+    val second = saveEnvironment(ownerUser.getUid, "second-env")
+    val mid =
+      createModelWithEnvironment("switchable-env-model", "sklearn", "1.5.0", first).model.getMid
+
+    modelResource.updateModelEnvironment(
+      ModelResource.ModelEnvironmentModification(mid, second),
+      sessionUser
+    )
+    modelDao.fetchOneByMid(mid).getVeid shouldEqual second
+
+    // A null veid is the "skip" choice, and has to be reachable after the fact.
+    modelResource.updateModelEnvironment(
+      ModelResource.ModelEnvironmentModification(mid, null),
+      sessionUser
+    )
+    modelDao.fetchOneByMid(mid).getVeid shouldBe null
+  }
+
+  it should "refuse to point a model at another user's environment" in {
+    val mine = saveEnvironment(ownerUser.getUid, "mine-to-keep")
+    val foreign = saveEnvironment(otherUser.getUid, "still-not-yours")
+    val mid = createModelWithEnvironment("guarded-env-model", "sklearn", "1.5.0", mine).model.getMid
+
+    val ex = intercept[BadRequestException] {
+      modelResource.updateModelEnvironment(
+        ModelResource.ModelEnvironmentModification(mid, foreign),
+        sessionUser
+      )
+    }
+    assertStatus(ex, 400)
+    modelDao.fetchOneByMid(mid).getVeid shouldEqual mine
+  }
+
+  it should "drop a model back to the default libraries when its environment is deleted" in {
+    import org.apache.texera.dao.jooq.generated.tables.VirtualEnvironments.VIRTUAL_ENVIRONMENTS
+    val veid = saveEnvironment(ownerUser.getUid, "doomed-env")
+    val mid =
+      createModelWithEnvironment("orphaned-env-model", "sklearn", "1.5.0", veid).model.getMid
+
+    getDSLContext
+      .deleteFrom(VIRTUAL_ENVIRONMENTS)
+      .where(VIRTUAL_ENVIRONMENTS.VEID.eq(veid))
+      .execute()
+
+    // ON DELETE SET NULL: the model survives, pointing at nothing.
+    modelDao.fetchOneByMid(mid) should not be null
+    modelDao.fetchOneByMid(mid).getVeid shouldBe null
   }
 
   it should "refuse to create a model if the user already has one with the same name" in {

@@ -32,12 +32,16 @@ import { ɵNzTransitionPatchDirective } from "ng-zorro-antd/core/transition-patc
 import {
   MODEL_FORMATS,
   MODEL_FRAMEWORKS,
-  MODEL_FRAMEWORKS_WITH_ENVIRONMENT,
+  MODEL_FRAMEWORKS_WITH_VERSION,
   ModelService,
   validateFrameworkVersion,
 } from "../../../../service/user/model/model.service";
 import { Model } from "../../../../../common/type/model";
 import { NotificationService } from "../../../../../common/service/notification/notification.service";
+import { WorkflowPveService } from "../../../../../workspace/service/virtual-environment/virtual-environment.service";
+
+/** The "skip" choice: no environment, so the engine's default libraries. */
+const SKIP_ENVIRONMENT = null;
 
 export function sanitizeModelName(name: string): string {
   return name
@@ -75,12 +79,52 @@ export class UserModelCreatorComponent implements OnInit {
   constructor(
     private modalRef: NzModalRef,
     private modelService: ModelService,
-    private notificationService: NotificationService
+    private notificationService: NotificationService,
+    private workflowPveService: WorkflowPveService
   ) {}
 
   ngOnInit() {
     this.setFormFields();
     this.isModelNameSanitized = false;
+    this.loadEnvironments();
+  }
+
+  /**
+   * Fills the environment picker with the environments the user has saved.
+   *
+   * Saved environments are served by a computing unit, so with none running the list
+   * cannot be fetched. That is not an error worth interrupting model creation over — the
+   * picker keeps only its "skip" choice and says why, and the model can be pointed at an
+   * environment later from its detail page.
+   */
+  private loadEnvironments(): void {
+    this.workflowPveService
+      .listUserPves()
+      .pipe(untilDestroyed(this))
+      .subscribe({
+        next: records => this.setEnvironmentOptions(records.map(r => ({ label: r.name, value: r.veid }))),
+        error: () =>
+          this.setEnvironmentOptions(
+            [],
+            "Your saved environments could not be listed — a computing unit has to be running to read them. You can set this later from the model's page."
+          ),
+      });
+  }
+
+  private setEnvironmentOptions(options: { label: string; value: number }[], unavailableReason?: string): void {
+    const field = this.fields.find(f => f.key === "veid");
+    if (!field?.templateOptions) return;
+    field.templateOptions.options = [
+      { label: "Skip — use the default libraries", value: SKIP_ENVIRONMENT },
+      ...options,
+    ];
+    field.templateOptions.description =
+      unavailableReason ??
+      (options.length === 0
+        ? "You have no saved Python environments yet. The model will load under the engine's default libraries."
+        : "The environment a Python UDF should load this model in. Skip to use the engine's default libraries.");
+    // Formly renders from a copy of the array, so replace it to make the change visible.
+    this.fields = [...this.fields];
   }
 
   private setFormFields() {
@@ -113,8 +157,8 @@ export class UserModelCreatorComponent implements OnInit {
         },
       },
       // Free text rather than a list: library releases move faster than this code does.
-      // Hidden for a framework that names no installable package, since there would be
-      // nothing to pin the version to.
+      // Hidden for a framework that names no library, since there would be nothing for a
+      // version to be a version of.
       {
         key: "frameworkVersion",
         type: "input",
@@ -122,11 +166,10 @@ export class UserModelCreatorComponent implements OnInit {
         templateOptions: {
           label: "Framework version",
           placeholder: "e.g. 1.5.0",
-          description:
-            "The version the model was trained against. Creating the model also saves a matching Python environment you can load into a computing unit.",
+          description: "The version the model was trained against, so whoever runs it knows what it needs.",
         },
         expressions: {
-          hide: (field: FormlyFieldConfig) => !MODEL_FRAMEWORKS_WITH_ENVIRONMENT.has(field.model?.framework),
+          hide: (field: FormlyFieldConfig) => !MODEL_FRAMEWORKS_WITH_VERSION.has(field.model?.framework),
         },
         validators: {
           version: {
@@ -147,6 +190,18 @@ export class UserModelCreatorComponent implements OnInit {
           label: "Format",
           required: true,
           options: MODEL_FORMATS.map(value => ({ label: value, value })),
+        },
+      },
+      // Populated by loadEnvironments once the user's saved environments arrive. Starts as
+      // "skip" alone so the form is complete and submittable even if they never do.
+      {
+        key: "veid",
+        type: "select",
+        defaultValue: SKIP_ENVIRONMENT,
+        templateOptions: {
+          label: "Python environment",
+          options: [{ label: "Skip — use the default libraries", value: SKIP_ENVIRONMENT }],
+          description: "The environment a Python UDF should load this model in.",
         },
       },
     ];
@@ -178,8 +233,10 @@ export class UserModelCreatorComponent implements OnInit {
       description: this.form.get("description")?.value ?? "",
       framework: this.form.get("framework")?.value,
       format: this.form.get("format")?.value,
-      // Blank means "unspecified"; the server stores null and provisions no environment.
+      // Blank means "unspecified"; the server stores null.
       frameworkVersion: (this.form.get("frameworkVersion")?.value as string)?.trim() || undefined,
+      // Null is the "skip" choice, which the server stores as no environment at all.
+      veid: (this.form.get("veid")?.value as number | null) ?? undefined,
       isPublic: this.isModelPublic,
       isDownloadable: this.isModelDownloadable,
       mid: undefined,

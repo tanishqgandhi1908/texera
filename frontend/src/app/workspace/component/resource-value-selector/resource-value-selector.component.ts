@@ -136,9 +136,9 @@ export class ResourceValueSelectorComponent extends FieldType<FieldTypeConfig> {
   }
 
   /**
-   * A model carries a saved Python environment pinned to the framework version it was
-   * trained against. Point that out when the selected computing unit does not have it —
-   * loading it, and selecting it on this operator, is left to the user.
+   * A model may name the saved Python environment it should be loaded in. Point that out
+   * when the selected computing unit does not have it — loading it, and selecting it on
+   * this operator, is left to the user.
    */
   private warnIfModelPveNotLoaded(selectedPath: string): void {
     this.modelPveHintService
@@ -147,12 +147,11 @@ export class ResourceValueSelectorComponent extends FieldType<FieldTypeConfig> {
       .subscribe(hint => {
         if (!hint) return;
         this.modalService.warning({
-          nzTitle: `"${hint.modelName}" has a Python environment you have not loaded`,
+          nzTitle: `"${hint.modelName}" asks for a Python environment you have not loaded`,
           nzContent:
-            `An environment named "${hint.pveName}" is saved with the package versions this model ` +
-            `was trained against, but "${hint.computingUnitName}" does not have it installed. ` +
-            `Without it the operator runs on the default Python environment, whose library versions ` +
-            `may not match the model.\n\n` +
+            `This model is set to be loaded in "${hint.pveName}", but "${hint.computingUnitName}" ` +
+            `does not have that environment installed. Without it the operator runs on the default ` +
+            `Python environment, whose library versions may not match the model.\n\n` +
             `To use it: open the computing unit's Python Environments panel, load "${hint.pveName}", ` +
             `then set this operator's "Virtual Environment" to it.`,
           nzOkText: "Got it",

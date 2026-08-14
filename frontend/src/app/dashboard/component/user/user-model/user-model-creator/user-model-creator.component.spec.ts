@@ -23,11 +23,12 @@ import { FormsModule, ReactiveFormsModule } from "@angular/forms";
 import { FieldType, FieldTypeConfig, FormlyModule } from "@ngx-formly/core";
 import { HttpClientTestingModule } from "@angular/common/http/testing";
 import { NzModalRef } from "ng-zorro-antd/modal";
-import { of, throwError } from "rxjs";
+import { Observable, of, throwError } from "rxjs";
 
 import { sanitizeModelName, UserModelCreatorComponent } from "./user-model-creator.component";
 import { MODEL_FORMATS, MODEL_FRAMEWORKS, ModelService } from "../../../../service/user/model/model.service";
 import { NotificationService } from "../../../../../common/service/notification/notification.service";
+import { WorkflowPveService } from "../../../../../workspace/service/virtual-environment/virtual-environment.service";
 import { commonTestProviders } from "../../../../../common/testing/test-utils";
 
 @Component({ template: "", standalone: true })
@@ -53,12 +54,14 @@ describe("UserModelCreatorComponent", () => {
   let createModel: ReturnType<typeof vi.fn>;
   let notifySuccess: ReturnType<typeof vi.fn>;
   let notifyError: ReturnType<typeof vi.fn>;
+  let userPves: Observable<unknown[]>;
 
   async function createFixture(): Promise<ComponentFixture<UserModelCreatorComponent>> {
     modalClose = vi.fn();
     createModel = vi.fn();
     notifySuccess = vi.fn();
     notifyError = vi.fn();
+    userPves = of([]);
 
     await TestBed.configureTestingModule({
       imports: [
@@ -78,6 +81,7 @@ describe("UserModelCreatorComponent", () => {
         { provide: NzModalRef, useValue: { close: modalClose } },
         { provide: ModelService, useValue: { createModel } },
         { provide: NotificationService, useValue: { success: notifySuccess, error: notifyError } },
+        { provide: WorkflowPveService, useValue: { listUserPves: () => userPves } },
         ...commonTestProviders,
       ],
     }).compileComponents();
@@ -85,7 +89,13 @@ describe("UserModelCreatorComponent", () => {
     return TestBed.createComponent(UserModelCreatorComponent);
   }
 
-  it("renders the five create fields, with no version-description field", async () => {
+  const environmentOptions = (fixture: ComponentFixture<UserModelCreatorComponent>) =>
+    fixture.componentInstance.fields.find(f => f.key === "veid")?.templateOptions?.options as Array<{
+      label: string;
+      value: number | null;
+    }>;
+
+  it("renders the six create fields, with no version-description field", async () => {
     const fixture = await createFixture();
     fixture.detectChanges();
 
@@ -96,6 +106,7 @@ describe("UserModelCreatorComponent", () => {
       "framework",
       "frameworkVersion",
       "format",
+      "veid",
     ]);
     expect(fixture.componentInstance.form.contains("name")).toBe(true);
   });
@@ -152,7 +163,60 @@ describe("UserModelCreatorComponent", () => {
     expect(modalClose).toHaveBeenCalledWith({ model: { mid: 9 } });
   });
 
-  it("sends the framework version, which provisions the model's environment", async () => {
+  it("offers the user's saved environments alongside the skip choice", async () => {
+    const fixture = await createFixture();
+    userPves = of([{ veid: 4, name: "sklearn-15", packages: {} }]);
+    fixture.detectChanges();
+
+    // Skip is first, so the default is always the least surprising one.
+    expect(environmentOptions(fixture)).toEqual([
+      { label: "Skip — use the default libraries", value: null },
+      { label: "sklearn-15", value: 4 },
+    ]);
+    expect(fixture.componentInstance.form.get("veid")?.value).toBeNull();
+  });
+
+  // Saved environments are served by a computing unit; with none running they cannot be
+  // listed, and that must not stand in the way of creating a model.
+  it("falls back to the skip choice alone when the environments cannot be listed", async () => {
+    const fixture = await createFixture();
+    userPves = throwError(() => new Error("no computing unit"));
+    fixture.detectChanges();
+
+    expect(environmentOptions(fixture)).toEqual([{ label: "Skip — use the default libraries", value: null }]);
+    expect(notifyError).not.toHaveBeenCalled();
+  });
+
+  it("sends the chosen environment", async () => {
+    const fixture = await createFixture();
+    userPves = of([{ veid: 4, name: "sklearn-15", packages: {} }]);
+    fixture.detectChanges();
+    const component = fixture.componentInstance;
+    createModel.mockReturnValue(of({ model: { mid: 13 } }));
+
+    component.form.get("name")?.setValue("churn-clf");
+    component.form.get("veid")?.setValue(4);
+
+    component.onClickCreate();
+
+    expect(createModel).toHaveBeenCalledWith(expect.objectContaining({ veid: 4 }));
+  });
+
+  it("sends no environment when the choice is skipped", async () => {
+    const fixture = await createFixture();
+    fixture.detectChanges();
+    const component = fixture.componentInstance;
+    createModel.mockReturnValue(of({ model: { mid: 14 } }));
+
+    component.form.get("name")?.setValue("churn-clf");
+
+    component.onClickCreate();
+
+    // undefined rather than null: the field is simply absent from the request body.
+    expect(createModel).toHaveBeenCalledWith(expect.objectContaining({ veid: undefined }));
+  });
+
+  it("sends the framework version, which is recorded as metadata", async () => {
     const fixture = await createFixture();
     fixture.detectChanges();
     const component = fixture.componentInstance;
@@ -183,7 +247,7 @@ describe("UserModelCreatorComponent", () => {
     expect(createModel).toHaveBeenCalledWith(expect.objectContaining({ frameworkVersion: undefined }));
   });
 
-  it("hides the version field for a framework that installs nothing", async () => {
+  it("hides the version field for a framework that names no library", async () => {
     const fixture = await createFixture();
     fixture.detectChanges();
     const component = fixture.componentInstance;
@@ -191,7 +255,7 @@ describe("UserModelCreatorComponent", () => {
     const versionField = component.fields.find(f => f.key === "frameworkVersion");
     const hide = versionField?.expressions?.hide as (field: { model: { framework: string } }) => boolean;
 
-    // "other" names no package, so there would be nothing to pin a version to.
+    // "other" names no library, so there would be nothing for a version to be a version of.
     expect(hide({ model: { framework: "other" } })).toBe(true);
     expect(hide({ model: { framework: "sklearn" } })).toBe(false);
     expect(hide({ model: { framework: "pytorch" } })).toBe(false);

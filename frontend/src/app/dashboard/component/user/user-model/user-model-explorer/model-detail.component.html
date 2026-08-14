@@ -76,6 +76,19 @@
             {{ modelFormat }}
           </nz-tag>
 
+          <!-- Only once the environment list has resolved the id to a name. -->
+          <nz-tag
+            *ngIf="modelEnvironmentName"
+            class="status-tag"
+            nz-tooltip
+            nzTooltipTitle="Python environment this model should be loaded in">
+            <i
+              nz-icon
+              nzType="code"
+              nzTheme="outline"></i>
+            {{ modelEnvironmentName }}
+          </nz-tag>
+
           <nz-tag class="status-tag">
             <i
               nz-icon
@@ -609,6 +622,38 @@
               (ngModelChange)="onFrameworkVersionChange($event)"
               [ngModelOptions]="{ updateOn: 'blur' }"
               style="width: 180px" />
+          </div>
+        </div>
+
+        <nz-divider></nz-divider>
+
+        <div class="settings-name-row">
+          <div class="settings-name-label">
+            <label>Python environment</label>
+            <p class="settings-hint">
+              Which of your saved environments a Python UDF should load this model in. Skip to use the engine's default
+              libraries.
+            </p>
+            <p
+              *ngIf="environmentsUnavailable"
+              class="settings-hint">
+              Your saved environments could not be listed — a computing unit has to be running to read them.
+            </p>
+          </div>
+          <div class="settings-name-controls">
+            <nz-select
+              [ngModel]="modelVeid ?? null"
+              (ngModelChange)="onEnvironmentChange($event)"
+              [nzDisabled]="environmentsUnavailable"
+              style="width: 180px">
+              <nz-option
+                [nzValue]="null"
+                nzLabel="Skip — default libraries"></nz-option>
+              <nz-option
+                *ngFor="let env of availableEnvironments"
+                [nzValue]="env.veid"
+                [nzLabel]="env.name"></nz-option>
+            </nz-select>
           </div>
         </div>
 

@@ -23,10 +23,11 @@ import { MarkdownService } from "ngx-markdown";
 import { NzModalService } from "ng-zorro-antd/modal";
 import { HttpErrorResponse } from "@angular/common/http";
 import { ActionType, EntityType, HubService } from "src/app/hub/service/hub.service";
-import { NEVER, of, Subject, throwError } from "rxjs";
+import { NEVER, Observable, of, Subject, throwError } from "rxjs";
 
 import { ModelDetailComponent } from "./model-detail.component";
 import { ModelService } from "../../../../service/user/model/model.service";
+import { WorkflowPveService } from "../../../../../workspace/service/virtual-environment/virtual-environment.service";
 import { DownloadService } from "../../../../service/user/download/download.service";
 import { NotificationService } from "../../../../../common/service/notification/notification.service";
 import { AdminSettingsService } from "../../../../service/admin/settings/admin-settings.service";
@@ -98,6 +99,7 @@ describe("ModelDetailComponent", () => {
     updateModelDescription: ReturnType<typeof vi.fn>;
     updateModelName: ReturnType<typeof vi.fn>;
     updateModelFramework: ReturnType<typeof vi.fn>;
+    updateModelEnvironment: ReturnType<typeof vi.fn>;
     updateModelFormat: ReturnType<typeof vi.fn>;
     deleteModel: ReturnType<typeof vi.fn>;
     getModelDiff: ReturnType<typeof vi.fn>;
@@ -114,6 +116,7 @@ describe("ModelDetailComponent", () => {
     downloadModelSingleFile: ReturnType<typeof vi.fn>;
   };
   let notificationService: { success: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
+  let userPves: Observable<unknown[]>;
   let routerStub: { navigate: ReturnType<typeof vi.fn> };
   let hubService: {
     getCounts: ReturnType<typeof vi.fn>;
@@ -133,6 +136,7 @@ describe("ModelDetailComponent", () => {
       updateModelDescription: vi.fn().mockReturnValue(of({})),
       updateModelName: vi.fn().mockReturnValue(of({})),
       updateModelFramework: vi.fn().mockReturnValue(of({})),
+      updateModelEnvironment: vi.fn().mockReturnValue(of({})),
       updateModelFormat: vi.fn().mockReturnValue(of({})),
       deleteModel: vi.fn().mockReturnValue(of({})),
       getModelDiff: vi.fn().mockReturnValue(of([])),
@@ -149,6 +153,7 @@ describe("ModelDetailComponent", () => {
       downloadModelSingleFile: vi.fn().mockReturnValue(of(new Blob())),
     };
     notificationService = { success: vi.fn(), error: vi.fn() };
+    userPves = of([{ veid: 4, name: "sklearn-15", packages: {} }]);
     routerStub = { navigate: vi.fn().mockResolvedValue(true) };
     hubService = {
       getCounts: vi.fn().mockReturnValue(of([{ counts: { like: 4 } }])),
@@ -171,6 +176,7 @@ describe("ModelDetailComponent", () => {
         { provide: MarkdownService, useValue: { parse: vi.fn(() => "") } },
         { provide: NzModalService, useValue: { create: vi.fn() } },
         { provide: AdminSettingsService, useValue: { getPublicSetting: vi.fn().mockReturnValue(of("20")) } },
+        { provide: WorkflowPveService, useValue: { listUserPves: () => userPves } },
         ...commonTestProviders,
       ],
     }).compileComponents();
@@ -746,6 +752,65 @@ describe("ModelDetailComponent", () => {
       component.onFrameworkChange("pytorch");
 
       expect(modelService.updateModelFramework).not.toHaveBeenCalled();
+    });
+
+    it("lists the environments to choose from and names the one in use", () => {
+      modelService.getModel.mockReturnValue(of(makeDashboardModel({ veid: 4 })));
+      fixture.detectChanges();
+
+      expect(component.availableEnvironments).toEqual([{ veid: 4, name: "sklearn-15" }]);
+      expect(component.modelEnvironmentName).toBe("sklearn-15");
+      expect(component.environmentsUnavailable).toBe(false);
+    });
+
+    // Saved environments are served by a computing unit; with none running the picker is
+    // disabled rather than showing an empty list that would look like a deliberate "skip".
+    it("marks the environments unavailable when they cannot be listed", () => {
+      userPves = throwError(() => new Error("no computing unit"));
+      fixture.detectChanges();
+
+      expect(component.availableEnvironments).toEqual([]);
+      expect(component.environmentsUnavailable).toBe(true);
+    });
+
+    it("persists an environment change optimistically", () => {
+      fixture.detectChanges();
+
+      component.onEnvironmentChange(4);
+
+      expect(modelService.updateModelEnvironment).toHaveBeenCalledWith(5, 4);
+      expect(component.modelVeid).toBe(4);
+    });
+
+    it("clears the environment when the choice is skipped", () => {
+      modelService.getModel.mockReturnValue(of(makeDashboardModel({ veid: 4 })));
+      fixture.detectChanges();
+
+      component.onEnvironmentChange(null);
+
+      expect(modelService.updateModelEnvironment).toHaveBeenCalledWith(5, undefined);
+      expect(component.modelVeid).toBeUndefined();
+      expect(notificationService.success).toHaveBeenCalledWith("Model will use the default libraries");
+    });
+
+    it("rolls the environment back when the update fails", () => {
+      modelService.getModel.mockReturnValue(of(makeDashboardModel({ veid: 4 })));
+      modelService.updateModelEnvironment.mockReturnValue(throwError(() => new Error("nope")));
+      fixture.detectChanges();
+
+      component.onEnvironmentChange(null);
+
+      expect(component.modelVeid).toBe(4);
+      expect(notificationService.error).toHaveBeenCalled();
+    });
+
+    it("does not call the backend when the environment is unchanged", () => {
+      modelService.getModel.mockReturnValue(of(makeDashboardModel({ veid: 4 })));
+      fixture.detectChanges();
+
+      component.onEnvironmentChange(4);
+
+      expect(modelService.updateModelEnvironment).not.toHaveBeenCalled();
     });
 
     it("persists a format change and rolls back on failure", () => {

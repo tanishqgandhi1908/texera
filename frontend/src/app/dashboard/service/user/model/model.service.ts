@@ -34,6 +34,7 @@ export const MODEL_UPDATE_BASE_URL = MODEL_BASE_URL + "/update";
 export const MODEL_UPDATE_NAME_URL = MODEL_UPDATE_BASE_URL + "/name";
 export const MODEL_UPDATE_DESCRIPTION_URL = MODEL_UPDATE_BASE_URL + "/description";
 export const MODEL_UPDATE_FRAMEWORK_URL = MODEL_UPDATE_BASE_URL + "/framework";
+export const MODEL_UPDATE_ENVIRONMENT_URL = MODEL_UPDATE_BASE_URL + "/environment";
 export const MODEL_UPDATE_FORMAT_URL = MODEL_UPDATE_BASE_URL + "/format";
 export const MODEL_UPDATE_PUBLICITY_URL = "update/publicity";
 export const MODEL_UPDATE_DOWNLOADABLE_URL = "update/downloadable";
@@ -54,24 +55,10 @@ const MODEL_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 export const MODEL_FRAMEWORKS = ["pytorch", "tensorflow", "onnx", "sklearn", "other"] as const;
 
 /**
- * Frameworks that resolve to an installable package, and so provision an environment when
- * a model is created. Mirrors ModelEnvironment.Distributions on the server — "other" is
- * absent from both, because there is nothing to install for it.
+ * Frameworks a version can be stated for. "other" is absent: it names no library, so there
+ * is nothing for a version to be a version of.
  */
-export const MODEL_FRAMEWORKS_WITH_ENVIRONMENT: ReadonlySet<string> = new Set([
-  "pytorch",
-  "tensorflow",
-  "onnx",
-  "sklearn",
-]);
-
-/**
- * Name of the Python environment a model provisions on creation. Must stay in step with
- * ModelEnvironment.pveName on the server.
- */
-export function modelPveName(modelName: string): string {
-  return `pve-for-model-${modelName}`;
-}
+export const MODEL_FRAMEWORKS_WITH_VERSION: ReadonlySet<string> = new Set(["pytorch", "tensorflow", "onnx", "sklearn"]);
 
 /** Matches ModelEnvironment.VersionPattern on the server. */
 const MODEL_FRAMEWORK_VERSION_PATTERN = /^[0-9]+(\.[0-9]+){0,3}[A-Za-z0-9.+-]{0,16}$/;
@@ -118,6 +105,7 @@ export class ModelService {
       framework: model.framework,
       format: model.format,
       frameworkVersion: model.frameworkVersion,
+      veid: model.veid,
     });
   }
 
@@ -148,6 +136,14 @@ export class ModelService {
       mid: mid,
       framework: framework,
       frameworkVersion: frameworkVersion,
+    });
+  }
+
+  /** `veid` undefined clears the choice, dropping the model back to the default libraries. */
+  public updateModelEnvironment(mid: number, veid?: number): Observable<Response> {
+    return this.http.post<Response>(`${AppSettings.getApiEndpoint()}/${MODEL_UPDATE_ENVIRONMENT_URL}`, {
+      mid: mid,
+      veid: veid ?? null,
     });
   }
 

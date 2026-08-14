@@ -119,6 +119,7 @@ const modelFixture: DashboardModel = {
     framework: "pytorch",
     format: "safetensors",
     frameworkVersion: undefined,
+    veid: undefined,
   },
   accessPrivilege: "READ",
   size: 0,

@@ -130,6 +130,7 @@ function makeModelItem(mid: number, ownerUid: number): SearchResultItem {
       framework: "pytorch",
       format: "safetensors",
       frameworkVersion: undefined,
+      veid: undefined,
     },
   };
   return { resourceType: "model", model };

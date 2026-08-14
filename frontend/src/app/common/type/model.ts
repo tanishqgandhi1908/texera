@@ -31,11 +31,16 @@ export interface Model {
   framework: string | undefined;
   format: string | undefined;
   /**
-   * Version of `framework` the model was trained against, e.g. "1.5.0". Creating a model
-   * with one also provisions a Python environment pinned to it, named by
-   * {@link modelPveName}.
+   * Version of `framework` the model was trained against, e.g. "1.5.0". Descriptive: it
+   * says which Python environment suits the model, but nothing is derived from it.
    */
   frameworkVersion: string | undefined;
+  /**
+   * The saved Python environment (`virtual_environments.veid`) the model should be loaded
+   * in, chosen by its owner from the environments they already have. Undefined means the
+   * choice was skipped, and a UDF loading the model runs on the engine's default libraries.
+   */
+  veid: number | undefined;
 }
 
 export interface ModelVersion {
