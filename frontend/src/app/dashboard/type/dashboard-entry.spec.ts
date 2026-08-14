@@ -123,6 +123,7 @@ function makeModel(): DashboardModel {
       coverImage: undefined,
       framework: "pytorch",
       format: "safetensors",
+      frameworkVersion: undefined,
     },
     accessPrivilege: "READ",
     // 0 is what /model/list actually returns for an explicit-access row

@@ -31,6 +31,8 @@ import {
   WorkflowPveService,
 } from "../../../../workspace/service/virtual-environment/virtual-environment.service";
 import { commonTestProviders } from "../../../../common/testing/test-utils";
+import { ComputingUnitStatusService } from "../../../../common/service/computing-unit/computing-unit-status/computing-unit-status.service";
+import { WorkflowComputingUnitManagingService } from "../../../../common/service/computing-unit/workflow-computing-unit/workflow-computing-unit-managing.service";
 
 describe("UserVenvComponent", () => {
   let component: UserVenvComponent;
@@ -51,6 +53,8 @@ describe("UserVenvComponent", () => {
   let confirmSpy: ReturnType<typeof vi.spyOn>;
   let capturedConfirmConfig: ModalOptions | undefined;
   let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+  let selectedUnit: unknown;
+  let listedUnits: unknown[];
 
   beforeEach(async () => {
     pveServiceSpy = {
@@ -66,6 +70,8 @@ describe("UserVenvComponent", () => {
       warning: vi.fn(),
     };
     consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    selectedUnit = { computingUnit: { cuid: 13, name: "CU 13" } };
+    listedUnits = [];
 
     await TestBed.configureTestingModule({
       imports: [
@@ -77,6 +83,18 @@ describe("UserVenvComponent", () => {
         NzModalService,
         { provide: WorkflowPveService, useValue: pveServiceSpy as unknown as WorkflowPveService },
         { provide: NotificationService, useValue: notificationSpy as unknown as NotificationService },
+        {
+          provide: ComputingUnitStatusService,
+          useValue: {
+            getSelectedComputingUnit: () => of(selectedUnit),
+          } as unknown as ComputingUnitStatusService,
+        },
+        {
+          provide: WorkflowComputingUnitManagingService,
+          useValue: {
+            listComputingUnits: () => of(listedUnits),
+          } as unknown as WorkflowComputingUnitManagingService,
+        },
         ...commonTestProviders,
       ],
     }).compileComponents();
@@ -103,6 +121,9 @@ describe("UserVenvComponent", () => {
   it("creates the component", () => {
     expect(component).toBeTruthy();
   });
+
+  // Which computing unit the gateway is asked to authorize against is WorkflowPveService's
+  // business now, and is covered in its own spec.
 
   describe("ngOnInit / refreshPves", () => {
     it("maps records to drafts, parsing every version-op form, and renders the list", () => {
@@ -218,11 +239,21 @@ describe("UserVenvComponent", () => {
       expect(component.saving).toBe(false);
     });
 
-    it("rejects a non-alphanumeric name", () => {
+    it("rejects a name containing a character pip could not be handed", () => {
       component.currentDraft = { name: "env 1", newPackages: [] };
       component.saveEnvironment();
-      expect(notificationSpy.error).toHaveBeenCalledWith("Environment name must contain only letters and numbers.");
+      expect(notificationSpy.error).toHaveBeenCalledWith(
+        "Environment name may contain only letters, numbers, dots, hyphens and underscores."
+      );
       expect(pveServiceSpy.savePve).not.toHaveBeenCalled();
+    });
+
+    // The environment a model provisions is named "pve-for-model-<model name>", so a
+    // hyphenated name has to be savable here too.
+    it("accepts a hyphenated name", () => {
+      component.currentDraft = { name: "pve-for-model-churn-clf", newPackages: [] };
+      component.saveEnvironment();
+      expect(pveServiceSpy.savePve).toHaveBeenCalledWith("pve-for-model-churn-clf", {});
     });
 
     it("rejects a name that duplicates a different environment", () => {

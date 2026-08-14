@@ -58,6 +58,7 @@ function makeModel(overrides: {
       coverImage: undefined,
       framework: overrides.framework ?? "pytorch",
       format: "safetensors",
+      frameworkVersion: undefined,
     },
     accessPrivilege: "WRITE",
     size: 0,

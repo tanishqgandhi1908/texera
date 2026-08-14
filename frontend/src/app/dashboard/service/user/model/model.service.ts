@@ -52,6 +52,36 @@ export const MODEL_NAME_MAX_LENGTH = 128;
 const MODEL_NAME_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 export const MODEL_FRAMEWORKS = ["pytorch", "tensorflow", "onnx", "sklearn", "other"] as const;
+
+/**
+ * Frameworks that resolve to an installable package, and so provision an environment when
+ * a model is created. Mirrors ModelEnvironment.Distributions on the server — "other" is
+ * absent from both, because there is nothing to install for it.
+ */
+export const MODEL_FRAMEWORKS_WITH_ENVIRONMENT: ReadonlySet<string> = new Set([
+  "pytorch",
+  "tensorflow",
+  "onnx",
+  "sklearn",
+]);
+
+/**
+ * Name of the Python environment a model provisions on creation. Must stay in step with
+ * ModelEnvironment.pveName on the server.
+ */
+export function modelPveName(modelName: string): string {
+  return `pve-for-model-${modelName}`;
+}
+
+/** Matches ModelEnvironment.VersionPattern on the server. */
+const MODEL_FRAMEWORK_VERSION_PATTERN = /^[0-9]+(\.[0-9]+){0,3}[A-Za-z0-9.+-]{0,16}$/;
+
+export function validateFrameworkVersion(version: string): string | null {
+  if (!MODEL_FRAMEWORK_VERSION_PATTERN.test(version) || version.length > 32) {
+    return "Invalid version: expected something like 1.5.0 or 2.13.0+cpu";
+  }
+  return null;
+}
 export const MODEL_FORMATS = [
   "torchscript",
   "state-dict",
@@ -87,6 +117,7 @@ export class ModelService {
       isModelDownloadable: model.isDownloadable,
       framework: model.framework,
       format: model.format,
+      frameworkVersion: model.frameworkVersion,
     });
   }
 
@@ -112,10 +143,11 @@ export class ModelService {
     });
   }
 
-  public updateModelFramework(mid: number, framework: string): Observable<Response> {
+  public updateModelFramework(mid: number, framework: string, frameworkVersion?: string): Observable<Response> {
     return this.http.post<Response>(`${AppSettings.getApiEndpoint()}/${MODEL_UPDATE_FRAMEWORK_URL}`, {
       mid: mid,
       framework: framework,
+      frameworkVersion: frameworkVersion,
     });
   }
 

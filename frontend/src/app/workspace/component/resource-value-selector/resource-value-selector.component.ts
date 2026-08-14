@@ -29,6 +29,7 @@ import { NzTooltipDirective } from "ng-zorro-antd/tooltip";
 import { ModelSelectionModalComponent } from "../model-selection-modal/model-selection-modal.component";
 import { DatasetSelectionModalComponent } from "../dataset-selection-modal/dataset-selection-modal.component";
 import { DATASET_INPUT_TYPE, MODEL_INPUT_TYPE } from "../../service/code-editor/ui-udf-parameters-parser.service";
+import { ModelPveHintService } from "../../service/virtual-environment/model-pve-hint.service";
 
 type ResourceBrowser = Readonly<{
   title: string;
@@ -74,7 +75,10 @@ const BROWSERS: Readonly<Record<string, ResourceBrowser>> = {
   imports: [NzButtonComponent, NzWaveDirective, ɵNzTransitionPatchDirective, NzIconDirective, NzTooltipDirective],
 })
 export class ResourceValueSelectorComponent extends FieldType<FieldTypeConfig> {
-  constructor(private modalService: NzModalService) {
+  constructor(
+    private modalService: NzModalService,
+    private modelPveHintService: ModelPveHintService
+  ) {
     super();
   }
 
@@ -123,6 +127,36 @@ export class ResourceValueSelectorComponent extends FieldType<FieldTypeConfig> {
       this.formControl.setValue(selectedPath);
       this.formControl.markAsDirty();
       this.formControl.markAsTouched();
+
+      const resource = (this.props as { resource?: string } | undefined)?.resource;
+      if (resource === MODEL_INPUT_TYPE) {
+        this.warnIfModelPveNotLoaded(selectedPath);
+      }
     });
+  }
+
+  /**
+   * A model carries a saved Python environment pinned to the framework version it was
+   * trained against. Point that out when the selected computing unit does not have it —
+   * loading it, and selecting it on this operator, is left to the user.
+   */
+  private warnIfModelPveNotLoaded(selectedPath: string): void {
+    this.modelPveHintService
+      .hintFor(selectedPath)
+      .pipe(untilDestroyed(this))
+      .subscribe(hint => {
+        if (!hint) return;
+        this.modalService.warning({
+          nzTitle: `"${hint.modelName}" has a Python environment you have not loaded`,
+          nzContent:
+            `An environment named "${hint.pveName}" is saved with the package versions this model ` +
+            `was trained against, but "${hint.computingUnitName}" does not have it installed. ` +
+            `Without it the operator runs on the default Python environment, whose library versions ` +
+            `may not match the model.\n\n` +
+            `To use it: open the computing unit's Python Environments panel, load "${hint.pveName}", ` +
+            `then set this operator's "Virtual Environment" to it.`,
+          nzOkText: "Got it",
+        });
+      });
   }
 }

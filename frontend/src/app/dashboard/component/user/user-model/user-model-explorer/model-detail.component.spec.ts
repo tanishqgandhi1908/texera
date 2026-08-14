@@ -722,8 +722,10 @@ describe("ModelDetailComponent", () => {
 
       component.onFrameworkChange("onnx");
 
-      expect(modelService.updateModelFramework).toHaveBeenCalledWith(5, "onnx");
+      // The version is cleared alongside: it belonged to the previous framework.
+      expect(modelService.updateModelFramework).toHaveBeenCalledWith(5, "onnx", undefined);
       expect(component.modelFramework).toBe("onnx");
+      expect(component.modelFrameworkVersion).toBeUndefined();
     });
 
     it("rolls the framework back when the update fails", () => {

@@ -85,12 +85,18 @@ describe("UserModelCreatorComponent", () => {
     return TestBed.createComponent(UserModelCreatorComponent);
   }
 
-  it("renders the four create fields, with no version-description field", async () => {
+  it("renders the five create fields, with no version-description field", async () => {
     const fixture = await createFixture();
     fixture.detectChanges();
 
     // Create-only: the dataset creator's dual-purpose version branch is deliberately not forked.
-    expect(fixture.componentInstance.fields.map(f => f.key)).toEqual(["name", "description", "framework", "format"]);
+    expect(fixture.componentInstance.fields.map(f => f.key)).toEqual([
+      "name",
+      "description",
+      "framework",
+      "frameworkVersion",
+      "format",
+    ]);
     expect(fixture.componentInstance.form.contains("name")).toBe(true);
   });
 
@@ -144,6 +150,51 @@ describe("UserModelCreatorComponent", () => {
     );
     expect(notifySuccess).toHaveBeenCalledWith("Model 'churn_predictor' created successfully.");
     expect(modalClose).toHaveBeenCalledWith({ model: { mid: 9 } });
+  });
+
+  it("sends the framework version, which provisions the model's environment", async () => {
+    const fixture = await createFixture();
+    fixture.detectChanges();
+    const component = fixture.componentInstance;
+    createModel.mockReturnValue(of({ model: { mid: 11 } }));
+
+    component.form.get("name")?.setValue("churn-clf");
+    component.form.get("framework")?.setValue("sklearn");
+    component.form.get("frameworkVersion")?.setValue(" 1.5.0 ");
+    component.form.get("format")?.setValue("joblib");
+
+    component.onClickCreate();
+
+    expect(createModel).toHaveBeenCalledWith(expect.objectContaining({ frameworkVersion: "1.5.0" }));
+  });
+
+  it("sends no framework version when the field is left blank", async () => {
+    const fixture = await createFixture();
+    fixture.detectChanges();
+    const component = fixture.componentInstance;
+    createModel.mockReturnValue(of({ model: { mid: 12 } }));
+
+    component.form.get("name")?.setValue("churn-clf");
+    component.form.get("framework")?.setValue("sklearn");
+    component.form.get("format")?.setValue("joblib");
+
+    component.onClickCreate();
+
+    expect(createModel).toHaveBeenCalledWith(expect.objectContaining({ frameworkVersion: undefined }));
+  });
+
+  it("hides the version field for a framework that installs nothing", async () => {
+    const fixture = await createFixture();
+    fixture.detectChanges();
+    const component = fixture.componentInstance;
+
+    const versionField = component.fields.find(f => f.key === "frameworkVersion");
+    const hide = versionField?.expressions?.hide as (field: { model: { framework: string } }) => boolean;
+
+    // "other" names no package, so there would be nothing to pin a version to.
+    expect(hide({ model: { framework: "other" } })).toBe(true);
+    expect(hide({ model: { framework: "sklearn" } })).toBe(false);
+    expect(hide({ model: { framework: "pytorch" } })).toBe(false);
   });
 
   it("reports the rename when the entered name had to be sanitized", async () => {

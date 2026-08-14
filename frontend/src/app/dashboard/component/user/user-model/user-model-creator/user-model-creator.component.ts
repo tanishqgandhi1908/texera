@@ -16,9 +16,8 @@
  * limitations under the License.
  */
 
-
 import { Component, OnInit } from "@angular/core";
-import { FormGroup, FormsModule } from "@angular/forms";
+import { AbstractControl, FormGroup, FormsModule } from "@angular/forms";
 import { FormlyFieldConfig, FormlyModule } from "@ngx-formly/core";
 import { UntilDestroy, untilDestroyed } from "@ngneat/until-destroy";
 import { HttpErrorResponse } from "@angular/common/http";
@@ -30,7 +29,13 @@ import { NzButtonComponent } from "ng-zorro-antd/button";
 import { NzWaveDirective } from "ng-zorro-antd/core/wave";
 import { ɵNzTransitionPatchDirective } from "ng-zorro-antd/core/transition-patch";
 
-import { MODEL_FORMATS, MODEL_FRAMEWORKS, ModelService } from "../../../../service/user/model/model.service";
+import {
+  MODEL_FORMATS,
+  MODEL_FRAMEWORKS,
+  MODEL_FRAMEWORKS_WITH_ENVIRONMENT,
+  ModelService,
+  validateFrameworkVersion,
+} from "../../../../service/user/model/model.service";
 import { Model } from "../../../../../common/type/model";
 import { NotificationService } from "../../../../../common/service/notification/notification.service";
 
@@ -107,6 +112,33 @@ export class UserModelCreatorComponent implements OnInit {
           options: MODEL_FRAMEWORKS.map(value => ({ label: value, value })),
         },
       },
+      // Free text rather than a list: library releases move faster than this code does.
+      // Hidden for a framework that names no installable package, since there would be
+      // nothing to pin the version to.
+      {
+        key: "frameworkVersion",
+        type: "input",
+        defaultValue: "",
+        templateOptions: {
+          label: "Framework version",
+          placeholder: "e.g. 1.5.0",
+          description:
+            "The version the model was trained against. Creating the model also saves a matching Python environment you can load into a computing unit.",
+        },
+        expressions: {
+          hide: (field: FormlyFieldConfig) => !MODEL_FRAMEWORKS_WITH_ENVIRONMENT.has(field.model?.framework),
+        },
+        validators: {
+          version: {
+            // Trim first, so that what is validated is what onClickCreate would send.
+            expression: (control: AbstractControl) => {
+              const value = ((control.value as string) ?? "").trim();
+              return !value || validateFrameworkVersion(value) === null;
+            },
+            message: () => "Invalid version: expected something like 1.5.0 or 2.13.0+cpu",
+          },
+        },
+      },
       {
         key: "format",
         type: "select",
@@ -146,6 +178,8 @@ export class UserModelCreatorComponent implements OnInit {
       description: this.form.get("description")?.value ?? "",
       framework: this.form.get("framework")?.value,
       format: this.form.get("format")?.value,
+      // Blank means "unspecified"; the server stores null and provisions no environment.
+      frameworkVersion: (this.form.get("frameworkVersion")?.value as string)?.trim() || undefined,
       isPublic: this.isModelPublic,
       isDownloadable: this.isModelDownloadable,
       mid: undefined,

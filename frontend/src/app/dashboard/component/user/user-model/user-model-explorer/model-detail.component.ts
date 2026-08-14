@@ -52,6 +52,7 @@ import {
   MODEL_FORMATS,
   MODEL_FRAMEWORKS,
   ModelService,
+  validateFrameworkVersion,
   validateModelName,
 } from "../../../../service/user/model/model.service";
 import { USER_MODEL } from "../../../../../app-routing.constant";
@@ -140,6 +141,7 @@ export class ModelDetailComponent implements OnInit {
   public modelIsPublic: boolean = false;
   public modelIsDownloadable: boolean = true;
   public modelFramework: string | undefined;
+  public modelFrameworkVersion: string | undefined;
   public modelFormat: string | undefined;
   public userModelAccessLevel: "READ" | "WRITE" | "NONE" = "NONE";
   public ownerEmail: string = "";
@@ -269,6 +271,7 @@ export class ModelDetailComponent implements OnInit {
           this.modelIsPublic = model.isPublic;
           this.modelIsDownloadable = model.isDownloadable;
           this.modelFramework = model.framework;
+          this.modelFrameworkVersion = model.frameworkVersion;
           this.modelFormat = model.format;
           this.ownerEmail = dashboardModel.ownerEmail;
           this.isOwner = dashboardModel.isOwner;
@@ -365,15 +368,36 @@ export class ModelDetailComponent implements OnInit {
     if (!this.mid || framework === this.modelFramework) {
       return;
     }
-    const previous = this.modelFramework;
+    // A version belongs to the framework it was recorded against, so switching framework
+    // clears it rather than leaving a version naming a package that no longer applies.
+    this.saveFramework(framework, undefined);
+  }
+
+  onFrameworkVersionChange(version: string): void {
+    const trimmed = (version ?? "").trim();
+    if (!this.mid || trimmed === (this.modelFrameworkVersion ?? "")) {
+      return;
+    }
+    if (trimmed && validateFrameworkVersion(trimmed) !== null) {
+      this.notificationService.error("Invalid version: expected something like 1.5.0 or 2.13.0+cpu");
+      return;
+    }
+    this.saveFramework(this.modelFramework ?? MODEL_FRAMEWORKS[0], trimmed || undefined);
+  }
+
+  private saveFramework(framework: string, frameworkVersion: string | undefined): void {
+    const previousFramework = this.modelFramework;
+    const previousVersion = this.modelFrameworkVersion;
     this.modelFramework = framework;
+    this.modelFrameworkVersion = frameworkVersion;
     this.modelService
-      .updateModelFramework(this.mid, framework)
+      .updateModelFramework(this.mid!, framework, frameworkVersion)
       .pipe(untilDestroyed(this))
       .subscribe({
         next: () => this.notificationService.success("Framework updated"),
         error: (err: unknown) => {
-          this.modelFramework = previous;
+          this.modelFramework = previousFramework;
+          this.modelFrameworkVersion = previousVersion;
           this.notificationService.error(extractErrorMessage(err));
         },
       });

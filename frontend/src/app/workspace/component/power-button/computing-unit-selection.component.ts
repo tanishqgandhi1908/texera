@@ -53,6 +53,7 @@ import {
 import {
   PvePackageResponse,
   UserPveRecord,
+  validatePveName,
   WorkflowPveService,
 } from "../../service/virtual-environment/virtual-environment.service";
 import { NgClass, NgIf, NgFor, DecimalPipe } from "@angular/common";
@@ -933,8 +934,9 @@ export class ComputingUnitSelectionComponent implements OnInit {
     const env = this.pves[index];
     const trimmedName = env.name.trim();
 
-    if (!/^[a-zA-Z0-9]+$/.test(trimmedName)) {
-      this.notificationService.error("Environment name must contain only letters and numbers.");
+    const nameError = validatePveName(trimmedName);
+    if (nameError) {
+      this.notificationService.error(nameError);
       return;
     }
 

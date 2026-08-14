@@ -63,7 +63,7 @@
               nz-icon
               nzType="experiment"
               nzTheme="outline"></i>
-            {{ modelFramework }}
+            {{ modelFramework }}{{ modelFrameworkVersion ? " " + modelFrameworkVersion : "" }}
           </nz-tag>
 
           <nz-tag
@@ -591,6 +591,24 @@
                 [nzValue]="framework"
                 [nzLabel]="framework"></nz-option>
             </nz-select>
+          </div>
+        </div>
+
+        <nz-divider></nz-divider>
+
+        <div class="settings-name-row">
+          <div class="settings-name-label">
+            <label>Framework version</label>
+            <p class="settings-hint">The version this model was trained against, e.g. 1.5.0.</p>
+          </div>
+          <div class="settings-name-controls">
+            <input
+              nz-input
+              placeholder="unspecified"
+              [ngModel]="modelFrameworkVersion"
+              (ngModelChange)="onFrameworkVersionChange($event)"
+              [ngModelOptions]="{ updateOn: 'blur' }"
+              style="width: 180px" />
           </div>
         </div>
 

@@ -129,6 +129,7 @@ function makeModelItem(mid: number, ownerUid: number): SearchResultItem {
       coverImage: undefined,
       framework: "pytorch",
       format: "safetensors",
+      frameworkVersion: undefined,
     },
   };
   return { resourceType: "model", model };

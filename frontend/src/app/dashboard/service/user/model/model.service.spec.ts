@@ -48,6 +48,7 @@ function buildModel(overrides: Partial<Model> = {}): Model {
     coverImage: undefined,
     framework: "pytorch",
     format: "safetensors",
+    frameworkVersion: undefined,
     ...overrides,
   };
 }

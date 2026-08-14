@@ -20,18 +20,40 @@
 import { TestBed } from "@angular/core/testing";
 import { AppSettings } from "../../../common/app-setting";
 import { HttpClientTestingModule, HttpTestingController } from "@angular/common/http/testing";
-import { PvePackageResponse, UserPveRecord, WorkflowPveService } from "./virtual-environment.service";
+import { PvePackageResponse, UserPveRecord, validatePveName, WorkflowPveService } from "./virtual-environment.service";
 import { commonTestProviders } from "../../../common/testing/test-utils";
 import { AuthService } from "../../../common/service/user/auth.service";
+import { ComputingUnitStatusService } from "../../../common/service/computing-unit/computing-unit-status/computing-unit-status.service";
+import { WorkflowComputingUnitManagingService } from "../../../common/service/computing-unit/workflow-computing-unit/workflow-computing-unit-managing.service";
+import { of } from "rxjs";
 
 describe("WorkflowPveService", () => {
   let service: WorkflowPveService;
   let httpTestingController: HttpTestingController;
+  // The unit the service resolves for /pve/db; overridden per test to drive the fallback.
+  let selectedUnit: unknown;
+  let listedUnits: unknown[];
 
   beforeEach(() => {
+    selectedUnit = { computingUnit: { cuid: 5, name: "CU 5" } };
+    listedUnits = [];
+
     TestBed.configureTestingModule({
       imports: [HttpClientTestingModule],
-      providers: [WorkflowPveService, ...commonTestProviders],
+      providers: [
+        WorkflowPveService,
+        {
+          provide: ComputingUnitStatusService,
+          useValue: { getSelectedComputingUnit: () => of(selectedUnit) } as unknown as ComputingUnitStatusService,
+        },
+        {
+          provide: WorkflowComputingUnitManagingService,
+          useValue: {
+            listComputingUnits: () => of(listedUnits),
+          } as unknown as WorkflowComputingUnitManagingService,
+        },
+        ...commonTestProviders,
+      ],
     });
     service = TestBed.inject(WorkflowPveService);
     httpTestingController = TestBed.inject(HttpTestingController);
@@ -47,9 +69,11 @@ describe("WorkflowPveService", () => {
       expect(resp.veid).toBe(42);
     });
 
-    const req = httpTestingController.expectOne(`${AppSettings.getApiEndpoint()}/pve/db`);
+    const req = httpTestingController.expectOne(r => r.url === `${AppSettings.getApiEndpoint()}/pve/db`);
     expect(req.request.method).toBe("POST");
     expect(req.request.body).toEqual({ name: "env-a", packages });
+    // Without cuid the Kubernetes gateway rejects the write with a 403.
+    expect(req.request.params.get("cuid")).toBe("5");
     req.flush({ veid: 42 });
   });
 
@@ -59,9 +83,10 @@ describe("WorkflowPveService", () => {
       expect(resp.veid).toBe(7);
     });
 
-    const req = httpTestingController.expectOne(`${AppSettings.getApiEndpoint()}/pve/db/7`);
+    const req = httpTestingController.expectOne(r => r.url === `${AppSettings.getApiEndpoint()}/pve/db/7`);
     expect(req.request.method).toBe("PUT");
     expect(req.request.body).toEqual({ name: "env-b", packages });
+    expect(req.request.params.get("cuid")).toBe("5");
     req.flush({ veid: 7 });
   });
 
@@ -71,17 +96,60 @@ describe("WorkflowPveService", () => {
       expect(resp).toEqual(records);
     });
 
-    const req = httpTestingController.expectOne(`${AppSettings.getApiEndpoint()}/pve/db`);
+    const req = httpTestingController.expectOne(r => r.url === `${AppSettings.getApiEndpoint()}/pve/db`);
     expect(req.request.method).toBe("GET");
+    expect(req.request.params.get("cuid")).toBe("5");
     req.flush(records);
+  });
+
+  // Regression guard: on Kubernetes the gateway authorizes the PVE endpoints through an
+  // ext-auth filter that reads `cuid`. Dropping the param makes every call 403 there while
+  // still passing locally, which silently disables the model-environment hint.
+  it("listUserPves(cuid) sends the cuid the gateway authorizes against", () => {
+    service.listUserPves(13).subscribe();
+
+    const req = httpTestingController.expectOne(r => r.url === `${AppSettings.getApiEndpoint()}/pve/db`);
+    expect(req.request.method).toBe("GET");
+    expect(req.request.params.get("cuid")).toBe("13");
+    req.flush([]);
   });
 
   it("deleteUserPve() DELETEs /pve/db/{veid}", () => {
     service.deleteUserPve(9).subscribe();
 
-    const req = httpTestingController.expectOne(`${AppSettings.getApiEndpoint()}/pve/db/9`);
+    const req = httpTestingController.expectOne(r => r.url === `${AppSettings.getApiEndpoint()}/pve/db/9`);
     expect(req.request.method).toBe("DELETE");
+    expect(req.request.params.get("cuid")).toBe("5");
     req.flush(null);
+  });
+
+  // Outside a workspace nothing is selected, so the service has to find a unit itself —
+  // otherwise every saved-environment call 403s on Kubernetes.
+  describe("resolving the computing unit for /pve/db", () => {
+    it("falls back to a running unit when none is selected", () => {
+      selectedUnit = null;
+      listedUnits = [
+        { status: "Pending", computingUnit: { cuid: 20 } },
+        { status: "Running", computingUnit: { cuid: 21 } },
+      ];
+
+      service.savePve("env-a", {}).subscribe();
+
+      const req = httpTestingController.expectOne(r => r.url === `${AppSettings.getApiEndpoint()}/pve/db`);
+      expect(req.request.params.get("cuid")).toBe("21");
+      req.flush({ veid: 1 });
+    });
+
+    it("omits the cuid when the user has no running unit", () => {
+      selectedUnit = null;
+      listedUnits = [{ status: "Pending", computingUnit: { cuid: 20 } }];
+
+      service.listUserPves().subscribe();
+
+      const req = httpTestingController.expectOne(r => r.url === `${AppSettings.getApiEndpoint()}/pve/db`);
+      expect(req.request.params.has("cuid")).toBe(false);
+      req.flush([]);
+    });
   });
 
   describe("token-parameterized endpoints", () => {
@@ -268,6 +336,24 @@ describe("WorkflowPveService", () => {
       expect(url).toBe(
         `ws://localhost:9000/wsapi/pve?packages=${expectedPackages}&cuid=7&pveName=my%20env&action=uninstall`
       );
+    });
+  });
+
+  describe("validatePveName", () => {
+    it("accepts the name a model provisions on creation", () => {
+      expect(validatePveName("pve-for-model-churn-clf")).toBeNull();
+    });
+
+    it("accepts letters, digits, dots, hyphens and underscores", () => {
+      ["env", "env1", "My_Env", "my.env", "a-b_c.1"].forEach(name => {
+        expect(validatePveName(name)).toBeNull();
+      });
+    });
+
+    it("rejects anything else, and anything longer than the name column", () => {
+      ["my env", "env!", "env/1", "", "e".repeat(161)].forEach(name => {
+        expect(validatePveName(name)).not.toBeNull();
+      });
     });
   });
 });

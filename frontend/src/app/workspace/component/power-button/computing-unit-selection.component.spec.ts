@@ -667,7 +667,7 @@ describe("PowerButtonComponent", () => {
   });
 
   describe("createVirtualEnvironment name validation", () => {
-    const VALIDATION_MSG = "Environment name must contain only letters and numbers.";
+    const VALIDATION_MSG = "Environment name may contain only letters, numbers, dots, hyphens and underscores.";
 
     let errorSpy: ReturnType<typeof vi.spyOn>;
     let runWsSpy: ReturnType<typeof vi.spyOn>;
@@ -694,10 +694,7 @@ describe("PowerButtonComponent", () => {
     }
 
     const invalidCases: ReadonlyArray<readonly [string, string]> = [
-      ["underscore", "my_env"],
-      ["dash", "my-env"],
       ["internal whitespace", "my env"],
-      ["dot", "my.env"],
       ["exclamation mark", "env!"],
       ["slash", "env/1"],
       ["only whitespace (empty after trim)", "   "],
@@ -715,10 +712,23 @@ describe("PowerButtonComponent", () => {
       });
     });
 
-    const validCases: ReadonlyArray<string> = ["env", "env1", "123", "ScanPyEnv", "abcXYZ0"];
+    // Dots, hyphens and underscores are accepted so that the environment a model
+    // provisions on creation — "pve-for-model-<model name>" — can be loaded into a
+    // computing unit. Matches PveManager.isValidPveName on the server.
+    const validCases: ReadonlyArray<string> = [
+      "env",
+      "env1",
+      "123",
+      "ScanPyEnv",
+      "abcXYZ0",
+      "my_env",
+      "my-env",
+      "my.env",
+      "pve-for-model-churn-clf",
+    ];
 
     validCases.forEach(name => {
-      it(`accepts ${JSON.stringify(name)} (alphanumeric only) and proceeds to create`, () => {
+      it(`accepts ${JSON.stringify(name)} and proceeds to create`, () => {
         setSinglePve(name);
 
         component.createVirtualEnvironment(0);
@@ -748,7 +758,7 @@ describe("PowerButtonComponent", () => {
 
     it("rejects an invalid name on a locked card too (validation runs before the locked branch)", () => {
       const deleteSpy = vi.spyOn(component as any, "deleteUserPackages").mockImplementation(() => {});
-      setSinglePve("my_env", true);
+      setSinglePve("my env", true);
 
       component.createVirtualEnvironment(0);
 

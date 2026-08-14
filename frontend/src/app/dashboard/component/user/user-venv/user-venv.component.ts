@@ -33,6 +33,7 @@ import { NzTooltipDirective } from "ng-zorro-antd/tooltip";
 import { NotificationService } from "../../../../common/service/notification/notification.service";
 import {
   UserPveRecord,
+  validatePveName,
   WorkflowPveService,
 } from "../../../../workspace/service/virtual-environment/virtual-environment.service";
 
@@ -103,6 +104,8 @@ export class UserVenvComponent implements OnInit {
   }
 
   private refreshPves(): void {
+    // WorkflowPveService resolves the computing unit the gateway authorizes against, so
+    // this page does not have to know that /pve/db is served by one.
     this.workflowPveService
       .listUserPves()
       .pipe(untilDestroyed(this))
@@ -175,8 +178,9 @@ export class UserVenvComponent implements OnInit {
       return;
     }
 
-    if (!/^[a-zA-Z0-9]+$/.test(trimmedName)) {
-      this.notificationService.error("Environment name must contain only letters and numbers.");
+    const nameError = validatePveName(trimmedName);
+    if (nameError) {
+      this.notificationService.error(nameError);
       return;
     }
 

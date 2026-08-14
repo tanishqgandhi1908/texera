@@ -30,6 +30,12 @@ export interface Model {
   coverImage: string | undefined;
   framework: string | undefined;
   format: string | undefined;
+  /**
+   * Version of `framework` the model was trained against, e.g. "1.5.0". Creating a model
+   * with one also provisions a Python environment pinned to it, named by
+   * {@link modelPveName}.
+   */
+  frameworkVersion: string | undefined;
 }
 
 export interface ModelVersion {
