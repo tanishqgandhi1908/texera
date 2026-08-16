@@ -137,7 +137,9 @@ object ComputingUnitManagingResource {
       gpuLimit: String,
       jvmMemorySize: String,
       shmSize: String,
-      uri: Option[String] = None
+      uri: Option[String] = None,
+      /** Environment to start this unit from. Absent uses the deployment's default image. */
+      eid: Option[Int] = None
   )
 
   case class WorkflowComputingUnitResourceLimit(
@@ -391,6 +393,18 @@ class ComputingUnitManagingResource {
         throw new ForbiddenException(s"Unsupported computing-unit type: ${param.unitType}")
     }
 
+    // Resolved before anything is written: starting from an environment whose image does
+    // not exist would leave a computing-unit row behind that can never run.
+    val environmentImage: Option[String] = param.eid.map { eid =>
+      EnvironmentResource
+        .readyImageFor(eid, user.getUid.intValue())
+        .getOrElse(
+          throw new ForbiddenException(
+            s"Environment $eid is not available. It must be one of yours and finished building."
+          )
+        )
+    }
+
     withTransaction(context) { ctx =>
       val wcDao = new WorkflowComputingUnitDao(ctx.configuration())
 
@@ -415,6 +429,13 @@ class ComputingUnitManagingResource {
               "gpuLimit" -> param.gpuLimit,
               "jvmMemorySize" -> param.jvmMemorySize,
               "shmSize" -> param.shmSize,
+              // Recorded so the unit can say what it is running. The name is stored
+              // alongside the id because an environment can be deleted while a unit
+              // started from it is still up, and "which image is this" should still
+              // have an answer then.
+              "eid" -> param.eid,
+              "environmentName" -> param.eid.flatMap(EnvironmentResource.nameOf),
+              "environmentImage" -> environmentImage,
               "nodeAddresses" -> Json.arr() // filled in later
             )
           )
@@ -487,7 +508,8 @@ class ComputingUnitManagingResource {
               EnvironmentalVariable.ENV_USER_JWT_TOKEN -> userToken,
               EnvironmentalVariable.ENV_JAVA_OPTS -> s"-Xmx${param.jvmMemorySize}"
             ),
-            Some(param.shmSize)
+            Some(param.shmSize),
+            environmentImage
           )
 
         } catch {

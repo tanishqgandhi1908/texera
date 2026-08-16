@@ -37,6 +37,8 @@ export interface StartComputingUnitRequest {
   jvmMemorySize: string;
   shmSize: string;
   localUri: string;
+  /** Environment to start from. Absent means the deployment's default image. */
+  eid?: number;
 }
 
 @Injectable({
@@ -74,7 +76,8 @@ export class ComputingUnitActionsService {
         request.memory,
         request.gpu,
         request.jvmMemorySize,
-        request.shmSize
+        request.shmSize,
+        request.eid
       );
     }
 

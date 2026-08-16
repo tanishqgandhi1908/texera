@@ -253,6 +253,35 @@ CREATE TABLE IF NOT EXISTS virtual_environments
     UNIQUE (uid, name)
 );
 
+-- A Dockerfile a user owns, and the image built from it, which a computing unit can
+-- then be started from. Supersedes virtual_environments for that choice: a virtual
+-- environment can only add pip packages to the engine image's own interpreter, so it
+-- cannot express a different Python, a system package or a compiler.
+CREATE TABLE IF NOT EXISTS environment
+(
+    eid           SERIAL PRIMARY KEY,
+    uid           INT          NOT NULL,
+    name          VARCHAR(128) NOT NULL,
+    dockerfile    TEXT         NOT NULL,
+    -- PENDING once created or edited, BUILDING while a job runs, then READY or FAILED.
+    -- A computing unit may only start from an environment that is READY.
+    status        VARCHAR(16)  NOT NULL DEFAULT 'PENDING',
+    -- Where the built image can be pulled from. Null until a build first succeeds.
+    image_tag     VARCHAR(512),
+    -- Incremented per build and used as the image tag, so a rebuild produces a new
+    -- reference instead of mutating one that running pods were started from.
+    build_number  INT          NOT NULL DEFAULT 0,
+    -- The build's output, kept here so it can still be read once the job that
+    -- produced it has been cleaned up.
+    build_log     TEXT,
+    creation_time TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (uid) REFERENCES "user"(uid) ON DELETE CASCADE,
+    UNIQUE (uid, name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_environment_uid ON environment (uid);
+
 -- workflow_executions
 CREATE TABLE IF NOT EXISTS workflow_executions
 (

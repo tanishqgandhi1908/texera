@@ -97,7 +97,10 @@ object KubernetesClient {
       memoryLimit: String,
       gpuLimit: String,
       envVars: Map[String, Any],
-      shmSize: Option[String] = None
+      shmSize: Option[String] = None,
+      // The image an environment built, when the unit was started from one. Absent means
+      // the deployment's default computing-unit image.
+      image: Option[String] = None
   ): Pod = {
     val podName = generatePodName(cuid)
     if (getPodByName(podName).isDefined) {
@@ -170,8 +173,12 @@ object KubernetesClient {
     val containerBuilder = specBuilder
       .addNewContainer()
       .withName("computing-unit-master")
-      .withImage(KubernetesConfig.computeUnitImageName)
-      .withImagePullPolicy(KubernetesConfig.computingUnitImagePullPolicy)
+      .withImage(image.getOrElse(KubernetesConfig.computeUnitImageName))
+      // An environment image is only ever in the registry, never preloaded on the node,
+      // so it has to be pulled even where the default image deliberately is not.
+      .withImagePullPolicy(
+        if (image.isDefined) "IfNotPresent" else KubernetesConfig.computingUnitImagePullPolicy
+      )
       .addNewPort()
       .withContainerPort(KubernetesConfig.computeUnitPortNumber)
       .endPort()

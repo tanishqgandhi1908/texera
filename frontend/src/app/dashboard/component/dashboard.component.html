@@ -123,6 +123,17 @@
           </li>
           <li
             nz-menu-item
+            nz-tooltip="Build images a computing unit can run"
+            nzMatchRouter="true"
+            nzTooltipPlacement="right"
+            [routerLink]="USER_ENVIRONMENT">
+            <span
+              nz-icon
+              nzType="container"></span>
+            <span>Environments</span>
+          </li>
+          <li
+            nz-menu-item
             nz-tooltip="Manage saved Python virtual environments"
             nzMatchRouter="true"
             nzTooltipPlacement="right"
@@ -130,7 +141,7 @@
             <span
               nz-icon
               nzType="python"></span>
-            <span>Environments</span>
+            <span>Python venvs</span>
           </li>
           <li
             *ngIf="sidebarTabs.quota_enabled"

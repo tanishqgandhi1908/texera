@@ -29,6 +29,7 @@ import org.apache.texera.dao.SqlServer
 import org.apache.texera.service.resource.{
   ComputingUnitAccessResource,
   ComputingUnitManagingResource,
+  EnvironmentResource,
   HealthCheckResource
 }
 import java.nio.file.Path
@@ -66,6 +67,7 @@ class ComputingUnitManagingService extends Application[ComputingUnitManagingServ
 
     environment.jersey().register(new ComputingUnitManagingResource)
     environment.jersey().register(new ComputingUnitAccessResource)
+    environment.jersey().register(new EnvironmentResource)
 
     RoleAnnotationEnforcer.enforce(
       environment.jersey.getResourceConfig,

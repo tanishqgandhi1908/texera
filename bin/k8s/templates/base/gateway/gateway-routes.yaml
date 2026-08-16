@@ -35,6 +35,16 @@ spec:
       backendRefs:
         - name: workflow-computing-unit-manager-svc
           port: 8888
+    # Environments are served by the computing-unit manager: building an image and
+    # starting a unit from it are the same concern, and it is the service that already
+    # holds the cluster credentials to do either.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/environment
+      backendRefs:
+        - name: workflow-computing-unit-manager-svc
+          port: 8888
     - matches:
         - path:
             type: PathPrefix

@@ -93,6 +93,25 @@
           </nz-select>
         </div>
 
+        <!-- Which image the unit runs. Absent means the deployment's default, which is
+             what almost every unit wants; an environment is for the cases it cannot cover. -->
+        <div
+          *ngIf="selectedComputingUnitType === 'kubernetes' && !environmentsUnavailable"
+          class="select-unit">
+          <span>Environment</span>
+          <nz-select
+            class="environment-selection"
+            nzAllowClear
+            nzPlaceHolder="Default image"
+            [(ngModel)]="selectedEid">
+            <nz-option
+              *ngFor="let environment of startableEnvironments"
+              [nzValue]="environment.eid"
+              [nzLabel]="environment.name">
+            </nz-option>
+          </nz-select>
+        </div>
+
         <!-- Advanced settings: progressive disclosure for the power-user knobs -->
         <div class="advanced-settings">
           <button

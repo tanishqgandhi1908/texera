@@ -72,6 +72,27 @@ spec:
               value: {{ .Values.mounter.hostMountRoot }}
             - name: KUBERNETES_IMAGE_NAME
               value: {{ .Values.texera.imageRegistry }}/{{ .Values.workflowComputingUnitPool.imageName }}:{{ .Values.texera.imageTag }}
+            # Environments: images built from a user-supplied Dockerfile.
+            - name: TEXERA_ENVIRONMENTS_ENABLED
+              value: "{{ .Values.environments.enabled }}"
+            - name: TEXERA_ENVIRONMENT_BUILDER_IMAGE
+              value: {{ .Values.environments.builderImage }}
+            - name: TEXERA_ENVIRONMENT_BUILD_NAMESPACE
+              value: {{ .Values.environments.buildNamespace }}
+            - name: TEXERA_ENVIRONMENT_BUILD_TIMEOUT_SECONDS
+              value: "{{ .Values.environments.buildTimeoutSeconds }}"
+            - name: TEXERA_ENVIRONMENT_REGISTRY
+              value: "{{ .Values.environmentRegistry.clusterIP }}:{{ .Values.environmentRegistry.port }}"
+            - name: TEXERA_ENVIRONMENT_BASE_IMAGE
+              value: {{ .Values.environments.baseImage }}
+            - name: TEXERA_ENVIRONMENT_BUILD_CPU_REQUEST
+              value: "{{ .Values.environments.buildCpuRequest }}"
+            - name: TEXERA_ENVIRONMENT_BUILD_MEMORY_REQUEST
+              value: "{{ .Values.environments.buildMemoryRequest }}"
+            - name: TEXERA_ENVIRONMENT_BUILD_CPU_LIMIT
+              value: "{{ .Values.environments.buildCpuLimit }}"
+            - name: TEXERA_ENVIRONMENT_BUILD_MEMORY_LIMIT
+              value: "{{ .Values.environments.buildMemoryLimit }}"
             # TexeraDB Access
             - name: STORAGE_JDBC_URL
               value: jdbc:postgresql://{{ .Release.Name }}-postgresql:5432/texera_db?currentSchema=texera_db,public

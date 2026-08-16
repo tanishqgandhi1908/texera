@@ -40,6 +40,7 @@ import {
   USER_DISCUSSION,
   USER_PROJECT,
   USER_PYTHON_VENV,
+  USER_ENVIRONMENT,
   USER_QUOTA,
   USER_WORKFLOW,
   USER_FEEDBACK,
@@ -119,6 +120,7 @@ export class DashboardComponent implements OnInit {
   protected readonly USER_MODEL = USER_MODEL;
   protected readonly USER_COMPUTING_UNIT = USER_COMPUTING_UNIT;
   protected readonly USER_PYTHON_VENV = USER_PYTHON_VENV;
+  protected readonly USER_ENVIRONMENT = USER_ENVIRONMENT;
   protected readonly USER_QUOTA = USER_QUOTA;
   protected readonly USER_DISCUSSION = USER_DISCUSSION;
   protected readonly USER_FEEDBACK = USER_FEEDBACK;
