@@ -123,17 +123,6 @@
           </li>
           <li
             nz-menu-item
-            nz-tooltip="Build images a computing unit can run"
-            nzMatchRouter="true"
-            nzTooltipPlacement="right"
-            [routerLink]="USER_ENVIRONMENT">
-            <span
-              nz-icon
-              nzType="container"></span>
-            <span>Environments</span>
-          </li>
-          <li
-            nz-menu-item
             nz-tooltip="Manage saved Python virtual environments"
             nzMatchRouter="true"
             nzTooltipPlacement="right"
@@ -208,6 +197,17 @@
               nz-icon
               nzType="mail"></span>
             <span>Gmail</span>
+          </li>
+          <li
+            nz-menu-item
+            nz-tooltip="Manage the images a computing unit can run"
+            nzMatchRouter="true"
+            nzTooltipPlacement="right"
+            [routerLink]="ADMIN_CU_IMAGE">
+            <span
+              nz-icon
+              nzType="container"></span>
+            <span>CU Images</span>
           </li>
           <li
             nz-menu-item

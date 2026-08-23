@@ -301,47 +301,46 @@ workflowComputingUnitPool:
     port: 8085
     targetPort: 8085
 
-# Environments: images built from a user's Dockerfile, which a computing unit can
-# then be started from. See docs/environments.md.
-environments:
+# Curated computing-unit images: an image an administrator registers, which a computing
+# unit can then be started from. The image is mirrored from wherever the administrator
+# points at into cuImageRegistry below, so a unit never pulls from an upstream registry
+# when it starts -- which also keeps upstream rate limits off the start path.
+curatedImages:
   enabled: true
-  # Image that runs the build. BuildKit rather than Kaniko, which was archived in
-  # June 2025; rootless so the build needs no privileged pod.
-  builderImage: moby/buildkit:v0.18.2-rootless
-  # Namespace the build jobs run in. The computing-unit pool namespace already
-  # exists and is already the place where user-triggered workloads run.
-  buildNamespace: texera-workflow-computing-unit-pool
-  # A build is killed past this, so a runaway Dockerfile cannot hold a slot forever.
-  buildTimeoutSeconds: 3600
-  # Deliberately a small request and a much larger limit: a build should schedule on a
-  # busy node, then use what is spare. Requesting what it can burst to would leave builds
-  # pending on a cluster that is otherwise perfectly able to run them.
-  #
-  # The limits are sized for a build that compiles something, not just one that installs
-  # packages. A source build fans out one compiler per core and each wants its own memory;
-  # measured against AlphaFold 3, a 2 CPU / 4 Gi ceiling pinned the pod at exactly its
-  # limits and turned a six-minute compile into more than an hour, with no signal to the
-  # user beyond a build that would not finish.
-  buildCpuRequest: "500m"
-  buildMemoryRequest: 2Gi
-  buildCpuLimit: "6"
-  buildMemoryLimit: 12Gi
-  # What a new environment's editor is pre-filled with, and what user Dockerfiles
-  # are expected to build FROM. Pushed into the registry by bin/k8s/push-base-image.sh.
-  baseImage: 10.96.0.99:5000/texera/computing-unit-master:dev
+  # Copies between registries directly, so it needs no daemon and no privileged pod.
+  mirrorImage: quay.io/skopeo/stable:v1.16.1
+  # Namespace mirror jobs run in. The computing-unit pool namespace already exists and is
+  # already where this service's cluster-side work lands.
+  mirrorNamespace: texera-workflow-computing-unit-pool
+  # A mirror past this is killed. Copying tens of gigabytes over a slow upstream link is
+  # legitimately slow, so this is generous compared with an ordinary job.
+  mirrorTimeoutSeconds: 3600
+  # A copy is almost all network and disk rather than CPU, so it asks for very little.
+  mirrorCpuRequest: "200m"
+  mirrorMemoryRequest: 512Mi
+  mirrorCpuLimit: "2"
+  mirrorMemoryLimit: 2Gi
 
-environmentRegistry:
+cuImageRegistry:
   enabled: true
-  name: texera-environment-registry
+  name: texera-cu-image-registry
   image: registry:2
   port: 5000
   # Pinned rather than assigned: an image reference embeds this address, so it has
   # to stay the same across a reinstall. Must sit inside the Service CIDR that the
   # container runtime treats as an insecure registry.
   clusterIP: 10.96.0.99
+  # On, unlike the proof of concept this replaces. A mirrored copy exists so that starting
+  # a unit does not depend on an upstream registry, and an emptyDir throws that away on a
+  # pod restart -- leaving every curated image needing a re-mirror before it can be used.
+  #
+  # Sizing: layers are shared, so the cost is one copy of the shared base plus each
+  # image's own layers, not the full size of every image. What actually grows this is
+  # re-mirroring, since each one publishes a new tag and the old one is not reclaimed
+  # until the registry is garbage-collected.
   persistence:
-    enabled: false
-    size: 20Gi
+    enabled: true
+    size: 50Gi
 
 # Per-node privileged DaemonSet that performs the GeeseFS FUSE mount for computing-unit
 # pods, so the CU pods stay unprivileged. port/hostMountRoot MUST match the values read by

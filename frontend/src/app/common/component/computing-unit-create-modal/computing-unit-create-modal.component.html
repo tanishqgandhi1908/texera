@@ -94,20 +94,20 @@
         </div>
 
         <!-- Which image the unit runs. Absent means the deployment's default, which is
-             what almost every unit wants; an environment is for the cases it cannot cover. -->
+             what almost every unit wants; a curated image is for the cases it cannot cover. -->
         <div
-          *ngIf="selectedComputingUnitType === 'kubernetes' && !environmentsUnavailable"
+          *ngIf="selectedComputingUnitType === 'kubernetes' && !imagesUnavailable && startableImages.length > 0"
           class="select-unit">
-          <span>Environment</span>
+          <span>Image</span>
           <nz-select
-            class="environment-selection"
+            class="image-selection"
             nzAllowClear
             nzPlaceHolder="Default image"
-            [(ngModel)]="selectedEid">
+            [(ngModel)]="selectedIid">
             <nz-option
-              *ngFor="let environment of startableEnvironments"
-              [nzValue]="environment.eid"
-              [nzLabel]="environment.name">
+              *ngFor="let image of startableImages"
+              [nzValue]="image.iid"
+              [nzLabel]="image.name">
             </nz-option>
           </nz-select>
         </div>

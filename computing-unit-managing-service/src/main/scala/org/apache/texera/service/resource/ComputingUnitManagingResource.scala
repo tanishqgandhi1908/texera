@@ -138,8 +138,8 @@ object ComputingUnitManagingResource {
       jvmMemorySize: String,
       shmSize: String,
       uri: Option[String] = None,
-      /** Environment to start this unit from. Absent uses the deployment's default image. */
-      eid: Option[Int] = None
+      /** Curated image to start this unit from. Absent uses the deployment's default. */
+      iid: Option[Int] = None
   )
 
   case class WorkflowComputingUnitResourceLimit(
@@ -393,14 +393,14 @@ class ComputingUnitManagingResource {
         throw new ForbiddenException(s"Unsupported computing-unit type: ${param.unitType}")
     }
 
-    // Resolved before anything is written: starting from an environment whose image does
-    // not exist would leave a computing-unit row behind that can never run.
-    val environmentImage: Option[String] = param.eid.map { eid =>
-      EnvironmentResource
-        .readyImageFor(eid, user.getUid.intValue())
+    // Resolved before anything is written: starting from an image that has not finished
+    // mirroring would leave a computing-unit row behind that can never run.
+    val curatedImage: Option[String] = param.iid.map { iid =>
+      CuratedImageResource
+        .readyImageFor(iid)
         .getOrElse(
           throw new ForbiddenException(
-            s"Environment $eid is not available. It must be one of yours and finished building."
+            s"Image $iid is not available. It must exist and have finished mirroring."
           )
         )
     }
@@ -430,12 +430,12 @@ class ComputingUnitManagingResource {
               "jvmMemorySize" -> param.jvmMemorySize,
               "shmSize" -> param.shmSize,
               // Recorded so the unit can say what it is running. The name is stored
-              // alongside the id because an environment can be deleted while a unit
+              // alongside the id because a curated image can be removed while a unit
               // started from it is still up, and "which image is this" should still
               // have an answer then.
-              "eid" -> param.eid,
-              "environmentName" -> param.eid.flatMap(EnvironmentResource.nameOf),
-              "environmentImage" -> environmentImage,
+              "iid" -> param.iid,
+              "imageName" -> param.iid.flatMap(CuratedImageResource.nameOf),
+              "curatedImage" -> curatedImage,
               "nodeAddresses" -> Json.arr() // filled in later
             )
           )
@@ -509,7 +509,7 @@ class ComputingUnitManagingResource {
               EnvironmentalVariable.ENV_JAVA_OPTS -> s"-Xmx${param.jvmMemorySize}"
             ),
             Some(param.shmSize),
-            environmentImage
+            curatedImage
           )
 
         } catch {

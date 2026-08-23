@@ -23,6 +23,7 @@ import org.apache.texera.auth.RoleAnnotationEnforcer
 import org.apache.texera.service.resource.{
   ComputingUnitAccessResource,
   ComputingUnitManagingResource,
+  CuratedImageResource,
   HealthCheckResource
 }
 import org.scalatest.flatspec.AnyFlatSpec
@@ -36,6 +37,7 @@ class ComputingUnitManagingServiceRunSpec extends AnyFlatSpec with Matchers {
       Seq(
         classOf[ComputingUnitManagingResource],
         classOf[ComputingUnitAccessResource],
+        classOf[CuratedImageResource],
         classOf[HealthCheckResource]
       )
     ) shouldBe empty

@@ -26,7 +26,6 @@ import { UserProjectSectionComponent } from "./dashboard/component/user/user-pro
 import { UserProjectComponent } from "./dashboard/component/user/user-project/user-project.component";
 import { UserComputingUnitComponent } from "./dashboard/component/user/user-computing-unit/user-computing-unit.component";
 import { UserVenvComponent } from "./dashboard/component/user/user-venv/user-venv.component";
-import { UserEnvironmentComponent } from "./dashboard/component/user/user-environment/user-environment.component";
 import { WorkspaceComponent } from "./workspace/component/workspace.component";
 import { AboutComponent } from "./hub/component/about/about.component";
 import { AuthGuardService } from "./common/service/user/auth-guard.service";
@@ -46,6 +45,7 @@ import { LandingPageComponent } from "./hub/component/landing-page/landing-page.
 import { USER_WORKFLOW } from "./app-routing.constant";
 import { HubSearchResultComponent } from "./hub/component/hub-search-result/hub-search-result.component";
 import { AdminSettingsComponent } from "./dashboard/component/admin/settings/admin-settings.component";
+import { AdminCuImageComponent } from "./dashboard/component/admin/cu-image/admin-cu-image.component";
 
 const routes: Routes = [];
 
@@ -160,10 +160,6 @@ routes.push({
           component: UserVenvComponent,
         },
         {
-          path: "environment",
-          component: UserEnvironmentComponent,
-        },
-        {
           path: "quota",
           component: UserQuotaComponent,
         },
@@ -192,6 +188,10 @@ routes.push({
         {
           path: "execution",
           component: AdminExecutionComponent,
+        },
+        {
+          path: "cu-image",
+          component: AdminCuImageComponent,
         },
         {
           path: "settings",

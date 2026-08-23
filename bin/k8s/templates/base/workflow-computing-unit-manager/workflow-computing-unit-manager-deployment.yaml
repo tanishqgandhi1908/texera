@@ -72,27 +72,26 @@ spec:
               value: {{ .Values.mounter.hostMountRoot }}
             - name: KUBERNETES_IMAGE_NAME
               value: {{ .Values.texera.imageRegistry }}/{{ .Values.workflowComputingUnitPool.imageName }}:{{ .Values.texera.imageTag }}
-            # Environments: images built from a user-supplied Dockerfile.
-            - name: TEXERA_ENVIRONMENTS_ENABLED
-              value: "{{ .Values.environments.enabled }}"
-            - name: TEXERA_ENVIRONMENT_BUILDER_IMAGE
-              value: {{ .Values.environments.builderImage }}
-            - name: TEXERA_ENVIRONMENT_BUILD_NAMESPACE
-              value: {{ .Values.environments.buildNamespace }}
-            - name: TEXERA_ENVIRONMENT_BUILD_TIMEOUT_SECONDS
-              value: "{{ .Values.environments.buildTimeoutSeconds }}"
-            - name: TEXERA_ENVIRONMENT_REGISTRY
-              value: "{{ .Values.environmentRegistry.clusterIP }}:{{ .Values.environmentRegistry.port }}"
-            - name: TEXERA_ENVIRONMENT_BASE_IMAGE
-              value: {{ .Values.environments.baseImage }}
-            - name: TEXERA_ENVIRONMENT_BUILD_CPU_REQUEST
-              value: "{{ .Values.environments.buildCpuRequest }}"
-            - name: TEXERA_ENVIRONMENT_BUILD_MEMORY_REQUEST
-              value: "{{ .Values.environments.buildMemoryRequest }}"
-            - name: TEXERA_ENVIRONMENT_BUILD_CPU_LIMIT
-              value: "{{ .Values.environments.buildCpuLimit }}"
-            - name: TEXERA_ENVIRONMENT_BUILD_MEMORY_LIMIT
-              value: "{{ .Values.environments.buildMemoryLimit }}"
+            # Curated computing-unit images: registered by an administrator, mirrored into
+            # the in-cluster registry, then started from by a computing unit.
+            - name: TEXERA_CURATED_IMAGES_ENABLED
+              value: "{{ .Values.curatedImages.enabled }}"
+            - name: TEXERA_CURATED_IMAGE_REGISTRY
+              value: "{{ .Values.cuImageRegistry.clusterIP }}:{{ .Values.cuImageRegistry.port }}"
+            - name: TEXERA_CURATED_IMAGE_MIRROR_IMAGE
+              value: {{ .Values.curatedImages.mirrorImage }}
+            - name: TEXERA_CURATED_IMAGE_MIRROR_NAMESPACE
+              value: {{ .Values.curatedImages.mirrorNamespace }}
+            - name: TEXERA_CURATED_IMAGE_MIRROR_TIMEOUT_SECONDS
+              value: "{{ .Values.curatedImages.mirrorTimeoutSeconds }}"
+            - name: TEXERA_CURATED_IMAGE_MIRROR_CPU_REQUEST
+              value: "{{ .Values.curatedImages.mirrorCpuRequest }}"
+            - name: TEXERA_CURATED_IMAGE_MIRROR_MEMORY_REQUEST
+              value: "{{ .Values.curatedImages.mirrorMemoryRequest }}"
+            - name: TEXERA_CURATED_IMAGE_MIRROR_CPU_LIMIT
+              value: "{{ .Values.curatedImages.mirrorCpuLimit }}"
+            - name: TEXERA_CURATED_IMAGE_MIRROR_MEMORY_LIMIT
+              value: "{{ .Values.curatedImages.mirrorMemoryLimit }}"
             # TexeraDB Access
             - name: STORAGE_JDBC_URL
               value: jdbc:postgresql://{{ .Release.Name }}-postgresql:5432/texera_db?currentSchema=texera_db,public

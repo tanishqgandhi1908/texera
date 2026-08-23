@@ -40,7 +40,6 @@ export const USER_DATASET_CREATE = `${USER_DATASET}/create`;
 export const USER_MODEL = `${USER}/model`;
 export const USER_COMPUTING_UNIT = `${USER}/compute`;
 export const USER_PYTHON_VENV = `${USER}/python-venv`;
-export const USER_ENVIRONMENT = `${USER}/environment`;
 export const USER_QUOTA = `${USER}/quota`;
 export const USER_DISCUSSION = `${USER}/discussion`;
 export const USER_FEEDBACK = `${USER}/feedback`;
@@ -49,6 +48,7 @@ export const ADMIN = "/admin";
 export const ADMIN_USER = `${ADMIN}/user`;
 export const ADMIN_GMAIL = `${ADMIN}/gmail`;
 export const ADMIN_EXECUTION = `${ADMIN}/execution`;
+export const ADMIN_CU_IMAGE = `${ADMIN}/cu-image`;
 export const ADMIN_SETTINGS = `${ADMIN}/settings`;
 
 export const SEARCH = "/search";

@@ -44,6 +44,7 @@ import { commonTestProviders } from "../../common/testing/test-utils";
 import { GuiConfigService } from "../../common/service/gui-config.service";
 import {
   ABOUT,
+  ADMIN_CU_IMAGE,
   ADMIN_EXECUTION,
   ADMIN_GMAIL,
   ADMIN_SETTINGS,
@@ -259,6 +260,7 @@ describe("DashboardComponent", () => {
     expect(ADMIN_USER).toBe("/admin/user");
     expect(ADMIN_EXECUTION).toBe("/admin/execution");
     expect(ADMIN_GMAIL).toBe("/admin/gmail");
+    expect(ADMIN_CU_IMAGE).toBe("/admin/cu-image");
     expect(ADMIN_SETTINGS).toBe("/admin/settings");
     expect(ABOUT).toBe("/about");
   });
@@ -284,9 +286,9 @@ describe("DashboardComponent", () => {
     };
     fixture.detectChanges();
 
-    // 8 "Your Work" links (incl. Python Venvs and Models) + 4 admin links + 1 about link
-    // + 1 feedback link = 14
-    expect(fixture.debugElement.queryAll(By.directive(RouterLink)).length).toBe(14);
+    // 8 "Your Work" links (incl. Python Venvs and Models) + 5 admin links (incl. CU
+    // Images) + 1 about link + 1 feedback link = 15
+    expect(fixture.debugElement.queryAll(By.directive(RouterLink)).length).toBe(15);
   });
 
   describe("sidebar active-route highlighting (#3490)", () => {

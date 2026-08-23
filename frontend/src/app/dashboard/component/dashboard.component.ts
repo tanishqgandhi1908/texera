@@ -33,6 +33,7 @@ import {
   ADMIN_EXECUTION,
   ADMIN_GMAIL,
   ADMIN_SETTINGS,
+  ADMIN_CU_IMAGE,
   ADMIN_USER,
   USER_COMPUTING_UNIT,
   USER_DATASET,
@@ -40,7 +41,6 @@ import {
   USER_DISCUSSION,
   USER_PROJECT,
   USER_PYTHON_VENV,
-  USER_ENVIRONMENT,
   USER_QUOTA,
   USER_WORKFLOW,
   USER_FEEDBACK,
@@ -120,7 +120,6 @@ export class DashboardComponent implements OnInit {
   protected readonly USER_MODEL = USER_MODEL;
   protected readonly USER_COMPUTING_UNIT = USER_COMPUTING_UNIT;
   protected readonly USER_PYTHON_VENV = USER_PYTHON_VENV;
-  protected readonly USER_ENVIRONMENT = USER_ENVIRONMENT;
   protected readonly USER_QUOTA = USER_QUOTA;
   protected readonly USER_DISCUSSION = USER_DISCUSSION;
   protected readonly USER_FEEDBACK = USER_FEEDBACK;
@@ -128,6 +127,7 @@ export class DashboardComponent implements OnInit {
   protected readonly ADMIN_GMAIL = ADMIN_GMAIL;
   protected readonly ADMIN_EXECUTION = ADMIN_EXECUTION;
   protected readonly ADMIN_SETTINGS = ADMIN_SETTINGS;
+  protected readonly ADMIN_CU_IMAGE = ADMIN_CU_IMAGE;
   protected readonly ABOUT = ABOUT;
   protected readonly String = String;
 

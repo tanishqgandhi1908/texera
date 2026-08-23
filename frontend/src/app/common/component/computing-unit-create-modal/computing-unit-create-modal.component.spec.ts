@@ -180,10 +180,39 @@ describe("ComputingUnitCreateModalComponent", () => {
       "4Gi",
       "0",
       "2G",
-      "128Mi"
+      "128Mi",
+      // No curated image selected, so the unit runs the deployment's default.
+      undefined
     );
     expect(mockNotificationService.success).toHaveBeenCalledWith("Successfully created the new compute unit");
     expect(unitCreatedSpy).toHaveBeenCalledWith(createdUnit);
+  });
+
+  // The image is the whole point of the dropdown, so it has to survive the trip from the
+  // selection to the service call rather than being dropped silently.
+  it("passes the selected curated image through to the create call", () => {
+    fixture.detectChanges();
+    component.selectedComputingUnitType = "kubernetes";
+    component.newComputingUnitName = "AlphaFold Unit";
+    component.selectedCpu = "2";
+    component.selectedMemory = "4Gi";
+    component.selectedGpu = "0";
+    component.selectedJvmMemorySize = "2G";
+    component.shmSizeValue = 128;
+    component.shmSizeUnit = "Mi";
+    component.selectedIid = 7;
+
+    component.startComputingUnit();
+
+    expect(mockComputingUnitService.createKubernetesBasedComputingUnit).toHaveBeenCalledWith(
+      "AlphaFold Unit",
+      "2",
+      "4Gi",
+      "0",
+      "2G",
+      "128Mi",
+      7
+    );
   });
 
   it("closes without creating on Cancel", () => {

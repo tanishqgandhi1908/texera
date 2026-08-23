@@ -85,21 +85,26 @@ The environment also contains `amber/requirements.txt`. That is not optional: th
 launches its own Python worker with this interpreter, so an environment holding only
 AF3 would fail before any user code ran.
 
-## Point the cluster at it
+## Register it as a computing-unit image
 
-```yaml
-# bin/k8s/values-local-minikube.yaml
-workflowComputingUnitPool:
-  imageName: computing-unit-alphafold3
-```
+This image is selected per computing unit, so nothing about the pool changes and other
+users are unaffected. Push it somewhere Texera can pull from, then register it:
 
 ```bash
-helm upgrade texera bin/k8s -f bin/k8s/values-local-minikube.yaml
+docker tag computing-unit-alphafold3 <your-registry>/cu-alphafold3:1.0
+docker push <your-registry>/cu-alphafold3:1.0
 ```
 
-Note what this says about the platform: **the image is a property of the pool, not of a
-computing unit.** There is no per-CU image selection, so switching the pool switches it
-for every CU. That is the gap a real "bring your own image" feature would close.
+In **Admin → CU Images**, add a row with a name (`AlphaFold 3`) and the reference you
+just pushed. Texera checks it is a computing-unit image before copying anything, then
+mirrors it into the in-cluster registry and marks it `READY`.
+
+It then appears in the **Image** dropdown when creating a computing unit. Only units
+started from it run AF3; every other unit keeps the default image.
+
+An earlier version of this demo set `workflowComputingUnitPool.imageName` instead, which
+switched the image for *every* computing unit because there was no per-CU selection. There
+is now, so that override is gone.
 
 ## Run the demo
 

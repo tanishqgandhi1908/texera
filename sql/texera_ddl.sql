@@ -253,34 +253,36 @@ CREATE TABLE IF NOT EXISTS virtual_environments
     UNIQUE (uid, name)
 );
 
--- A Dockerfile a user owns, and the image built from it, which a computing unit can
--- then be started from. Supersedes virtual_environments for that choice: a virtual
--- environment can only add pip packages to the engine image's own interpreter, so it
--- cannot express a different Python, a system package or a compiler.
-CREATE TABLE IF NOT EXISTS environment
+-- A computing-unit image an administrator has curated, which any user may then start a
+-- computing unit from. Rows are global rather than owned: the point of curating is that
+-- one trusted list is offered to everybody, so created_by is for auditing only and does
+-- not restrict who may use the image.
+CREATE TABLE IF NOT EXISTS cu_image
 (
-    eid           SERIAL PRIMARY KEY,
-    uid           INT          NOT NULL,
-    name          VARCHAR(128) NOT NULL,
-    dockerfile    TEXT         NOT NULL,
-    -- PENDING once created or edited, BUILDING while a job runs, then READY or FAILED.
-    -- A computing unit may only start from an environment that is READY.
-    status        VARCHAR(16)  NOT NULL DEFAULT 'PENDING',
-    -- Where the built image can be pulled from. Null until a build first succeeds.
-    image_tag     VARCHAR(512),
-    -- Incremented per build and used as the image tag, so a rebuild produces a new
+    iid            SERIAL PRIMARY KEY,
+    -- What users see in the computing-unit dropdown.
+    name           VARCHAR(128) NOT NULL,
+    -- What the administrator supplied, normalised to an image reference.
+    source_ref     VARCHAR(512) NOT NULL,
+    -- The digest source_ref resolved to when last mirrored. A tag can be moved upstream;
+    -- this records what was actually copied.
+    source_digest  VARCHAR(128),
+    -- PENDING once created, MIRRORING while the copy job runs, then READY or FAILED.
+    -- A computing unit may only start from a READY image.
+    status         VARCHAR(16)  NOT NULL DEFAULT 'PENDING',
+    -- Where a computing unit pulls from: the in-cluster registry, not the upstream one.
+    image_tag      VARCHAR(512),
+    -- Incremented per mirror and used as the tag, so re-mirroring publishes a new
     -- reference instead of mutating one that running pods were started from.
-    build_number  INT          NOT NULL DEFAULT 0,
-    -- The build's output, kept here so it can still be read once the job that
-    -- produced it has been cleaned up.
-    build_log     TEXT,
-    creation_time TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    update_time   TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (uid) REFERENCES "user"(uid) ON DELETE CASCADE,
-    UNIQUE (uid, name)
+    mirror_number  INT          NOT NULL DEFAULT 0,
+    -- The mirror job's output, including why validation rejected an image.
+    mirror_log     TEXT,
+    created_by     INT,
+    creation_time  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES "user"(uid) ON DELETE SET NULL,
+    UNIQUE (name)
 );
-
-CREATE INDEX IF NOT EXISTS idx_environment_uid ON environment (uid);
 
 -- workflow_executions
 CREATE TABLE IF NOT EXISTS workflow_executions
