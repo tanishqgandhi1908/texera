@@ -190,6 +190,40 @@ object ImageMirrorClient extends LazyLogging {
     }
   }
 
+  /**
+    * Explains why submitting a mirror failed, in terms an administrator can act on.
+    *
+    * The message alone is not enough. A client with no usable kube config falls back to
+    * the legacy http://localhost:8080 API address, and whatever answers there produces an
+    * opaque failure -- "An error has occurred." if something unrelated is listening on
+    * that port, which on a development machine it usually is. That reads as a Texera bug
+    * rather than a missing cluster, so the address actually being used is named here.
+    */
+  def describeStartFailure(e: Throwable): String = {
+    val cause = Option(e.getCause).filter(_ ne e)
+    val detail = Option(e.getMessage)
+      .map(_.trim)
+      .filter(_.nonEmpty)
+      .getOrElse("no message")
+    val master =
+      try Option(client.getMasterUrl).map(_.toString).getOrElse("unknown")
+      catch { case _: Throwable => "unknown" }
+
+    s"""Could not start the mirror job.
+       |
+       |  ${e.getClass.getSimpleName}: $detail${cause.map(c =>
+      s"\n  caused by ${c.getClass.getSimpleName}: ${Option(c.getMessage).getOrElse("")}"
+    ).getOrElse("")}
+       |
+       |Kubernetes API address: $master
+       |Namespace:              $namespace
+       |
+       |Mirroring runs as a Kubernetes Job, so this needs a reachable cluster. If the
+       |address above is http://localhost:8080 then no kube context is set and the client
+       |fell back to that default -- check `kubectl config current-context`, and that the
+       |namespace above exists.""".stripMargin
+  }
+
   /** The digest the source tag resolved to, as printed by a successful job. */
   def sourceDigestFrom(log: String): Option[String] =
     log.linesIterator

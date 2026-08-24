@@ -81,6 +81,25 @@ class CuratedImageResourceSpec extends AnyFlatSpec with Matchers {
     ImageMirrorClient.sourceDigestFrom(log) shouldBe Some("sha256:0123abc")
   }
 
+  // The regression this guards: the bare exception message can be something as useless as
+  // "An error has occurred." when the client fell back to a default API address, which
+  // reads as a Texera bug rather than a missing cluster.
+  "describeStartFailure" should "name the failure type and where it was talking to" in {
+    val described = ImageMirrorClient.describeStartFailure(
+      new RuntimeException("An error has occurred.")
+    )
+    described should include("RuntimeException")
+    described should include("An error has occurred.")
+    described should include("Kubernetes API address")
+    described should include("reachable cluster")
+  }
+
+  it should "still say something useful when the exception has no message" in {
+    val described = ImageMirrorClient.describeStartFailure(new NullPointerException)
+    described should include("NullPointerException")
+    described should include("no message")
+  }
+
   it should "return nothing when the mirror failed before printing one" in {
     val log =
       """Inspecting texera/not-a-cu-image:1.0

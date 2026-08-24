@@ -386,7 +386,7 @@ class CuratedImageResource extends LazyLogging {
         context
           .update(CU_IMAGE)
           .set(STATUS, Status.Failed)
-          .set(MIRROR_LOG, s"Could not start the mirror job: ${e.getMessage}")
+          .set(MIRROR_LOG, ImageMirrorClient.describeStartFailure(e))
           .where(IID.eq(iid))
           .execute()
     }
