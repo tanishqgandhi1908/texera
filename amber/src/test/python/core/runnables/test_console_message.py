@@ -55,18 +55,18 @@ class TestConsoleMessage:
         )
 
     @pytest.fixture
-    def mock_coordinator_channel(self):
+    def mock_controller_channel(self):
         return ChannelIdentity(
-            ActorVirtualIdentity("COORDINATOR"), ActorVirtualIdentity("test"), True
+            ActorVirtualIdentity("CONTROLLER"), ActorVirtualIdentity("test"), True
         )
 
     @pytest.mark.timeout(2)
     def test_console_message_serialization(
-        self, mock_coordinator_channel, console_message
+        self, mock_controller_channel, console_message
     ):
         """
         Test the serialization of the console message
-        :param mock_coordinator_channel: the mock control channel id
+        :param mock_controller_channel: the mock control channel id
         :param console_message: the test message
         """
         # below statements wrap the console message as the python control message
@@ -78,7 +78,7 @@ class TestConsoleMessage:
             ),
         )
         python_control_message = PythonControlMessage(
-            tag=mock_coordinator_channel, payload=payload
+            tag=mock_controller_channel, payload=payload
         )
         # serialize the python control message to bytes
         python_control_message_bytes = bytes(python_control_message)

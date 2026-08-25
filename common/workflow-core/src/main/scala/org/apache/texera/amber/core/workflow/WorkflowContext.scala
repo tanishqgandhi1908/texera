@@ -35,8 +35,5 @@ class WorkflowContext(
     var workflowId: WorkflowIdentity = DEFAULT_WORKFLOW_ID,
     var executionId: ExecutionIdentity = DEFAULT_EXECUTION_ID,
     var workflowSettings: WorkflowSettings = DEFAULT_WORKFLOW_SETTINGS,
-    var cuid: Option[Int] = None,
-    // The Lakekeeper catalog name this execution writes into; becomes the `/wh/<name>`
-    // URI segment. None routes to the shared default warehouse.
-    var warehouse: Option[String] = None
+    var cuid: Option[Int] = None
 )

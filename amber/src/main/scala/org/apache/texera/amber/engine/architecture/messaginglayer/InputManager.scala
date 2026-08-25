@@ -105,8 +105,7 @@ class InputManager(
           } catch {
             case e: Exception =>
               throw new RuntimeException(
-                s"Error starting input port materialization reader thread: ${e.getMessage}",
-                e
+                s"Error starting input port materialization reader thread: ${e.getMessage}"
               )
           }
         })

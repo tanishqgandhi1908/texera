@@ -235,7 +235,7 @@ export class SearchService {
           const ui = (userMap as any)[ownerId];
           if (ui) {
             entry.setOwnerName(ui.userName);
-            entry.setOwnerAvatar(ui.avatar ?? "");
+            entry.setOwnerGoogleAvatar(ui.googleAvatar ?? "");
           }
 
           if (doCounts) {

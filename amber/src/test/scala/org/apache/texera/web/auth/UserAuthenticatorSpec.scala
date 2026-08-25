@@ -35,9 +35,10 @@ class UserAuthenticatorSpec extends AnyFlatSpec with Matchers {
     val claims = new JwtClaims
     claims.setSubject("alice")
     claims.setClaim("userId", 42)
+    claims.setClaim("googleId", "g-123")
     claims.setClaim("email", "alice@example.com")
     claims.setClaim("role", UserRoleEnum.ADMIN.name)
-    claims.setClaim("avatar", "avatar-blob")
+    claims.setClaim("googleAvatar", "avatar-blob")
     claims.setExpirationTimeMinutesInTheFuture(10f)
     claims
   }
@@ -54,7 +55,8 @@ class UserAuthenticatorSpec extends AnyFlatSpec with Matchers {
     u.getUid shouldBe 42
     u.getName shouldBe "alice"
     u.getEmail shouldBe "alice@example.com"
-    u.getAvatar shouldBe "avatar-blob"
+    u.getGoogleId shouldBe "g-123"
+    u.getGoogleAvatar shouldBe "avatar-blob"
     u.getRole shouldBe UserRoleEnum.ADMIN
   }
 

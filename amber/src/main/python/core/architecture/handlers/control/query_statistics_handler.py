@@ -27,10 +27,8 @@ from proto.org.apache.texera.amber.engine.architecture.worker import (
 
 class QueryStatisticsHandler(ControlHandler):
     async def query_statistics(self, req: EmptyRequest) -> WorkerMetricsResponse:
-        state, state_version = self.context.state_manager.get_state_with_version()
         metrics = WorkerMetrics(
-            worker_state=state,
+            worker_state=self.context.state_manager.get_current_state(),
             worker_statistics=self.context.statistics_manager.get_statistics(),
-            state_version=state_version,
         )
         return WorkerMetricsResponse(metrics)

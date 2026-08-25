@@ -30,10 +30,10 @@ import org.apache.texera.amber.engine.architecture.common.WorkflowActor.{
   NetworkAck,
   NetworkMessage
 }
-import org.apache.texera.amber.engine.architecture.coordinator.{
+import org.apache.texera.amber.engine.architecture.controller.{
   ClientEvent,
-  Coordinator,
-  CoordinatorConfig
+  Controller,
+  ControllerConfig
 }
 import org.apache.texera.amber.engine.architecture.rpc.controlcommands.{
   AsyncRPCContext,
@@ -53,12 +53,13 @@ import org.apache.texera.amber.engine.common.ambermessage.{
   WorkflowRecoveryMessage
 }
 import org.apache.texera.amber.engine.common.client.ClientActor.{
+  ClosureRequest,
   CommandRequest,
   InitializeRequest,
   ObservableRequest
 }
 import org.apache.texera.amber.engine.common.rpc.AsyncRPCClient
-import org.apache.texera.amber.engine.common.virtualidentity.util.{CLIENT, COORDINATOR}
+import org.apache.texera.amber.engine.common.virtualidentity.util.{CLIENT, CONTROLLER}
 import org.apache.texera.amber.error.ErrorUtils.reconstructThrowable
 
 import scala.collection.mutable
@@ -68,10 +69,12 @@ private[client] object ClientActor {
   case class InitializeRequest(
       workflowContext: WorkflowContext,
       physicalPlan: PhysicalPlan,
-      coordinatorConfig: CoordinatorConfig
+      controllerConfig: ControllerConfig
   )
 
   case class ObservableRequest(pf: PartialFunction[Any, Unit])
+
+  case class ClosureRequest[T](closure: () => T)
 
   case class CommandRequest(
       methodName: String,
@@ -82,7 +85,7 @@ private[client] object ClientActor {
 
 private[client] class ClientActor extends Actor with AmberLogging {
   var actorId: ActorVirtualIdentity = ActorVirtualIdentity("Client")
-  var coordinator: ActorRef = _
+  var controller: ActorRef = _
   var controlId = 0L
   val promiseMap = new mutable.LongMap[Promise[ControlReturn]]()
   var handlers: PartialFunction[Any, Unit] = PartialFunction.empty
@@ -98,19 +101,26 @@ private[client] class ClientActor extends Actor with AmberLogging {
   }
 
   override def receive: Receive = {
-    case InitializeRequest(workflowContext, physicalPlan, coordinatorConfig) =>
-      assert(coordinator == null)
-      coordinator = context.actorOf(
-        Coordinator.props(workflowContext, physicalPlan, coordinatorConfig)
+    case InitializeRequest(workflowContext, physicalPlan, controllerConfig) =>
+      assert(controller == null)
+      controller = context.actorOf(
+        Controller.props(workflowContext, physicalPlan, controllerConfig)
       )
       sender() ! Ack
     case CreditRequest(channelId: ChannelIdentity) =>
       sender() ! CreditResponse(channelId, getQueuedCredit(channelId))
+    case ClosureRequest(closure) =>
+      try {
+        sender() ! closure()
+      } catch {
+        case e: Throwable =>
+          sender() ! e
+      }
     case commandRequest: CommandRequest =>
-      coordinator ! AsyncRPCClient.ControlInvocation(
+      controller ! AsyncRPCClient.ControlInvocation(
         commandRequest.methodName,
         commandRequest.command,
-        AsyncRPCContext(CLIENT, COORDINATOR),
+        AsyncRPCContext(CLIENT, CONTROLLER),
         controlId
       )
       promiseMap(controlId) = commandRequest.promise
@@ -144,8 +154,8 @@ private[client] class ClientActor extends Actor with AmberLogging {
       }
     case x: WorkflowRecoveryMessage =>
       sender() ! Ack
-      coordinator ! x
+      controller ! x
     case other =>
-      logger.debug("client actor cannot handle " + other) //skip
+      logger.warn("client actor cannot handle " + other) //skip
   }
 }

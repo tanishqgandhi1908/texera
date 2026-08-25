@@ -23,64 +23,18 @@ import org.apache.texera.amber.core.virtualidentity.{
   ChannelIdentity,
   EmbeddedControlMessageIdentity
 }
-import org.apache.texera.amber.engine.architecture.common.ProcessingStepCursor.INIT_STEP
 import org.apache.texera.amber.engine.common.ambermessage.WorkflowFIFOMessage
 
-import scala.collection.mutable
+abstract class ReplayLogger {
 
-class ReplayLogger {
-
-  private val tempLogs = mutable.ArrayBuffer[ReplayLogRecord]()
-
-  private var currentChannelId: ChannelIdentity = _
-
-  private var lastStep = INIT_STEP
-
-  /**
-    * Records the current processing step along with an associated message.
-    * This method also monitors the channel information. If the new channel matches the last recorded channel
-    * and there is no associated message for this step, the logging operation is bypassed.
-    * Otherwise, it appends a ProcessingStep log record with the message content, provided the message exists.
-    *
-    * @param step      The current processing step.
-    * @param channelId The channel ID associated with the processing step.
-    * @param message   An optional message associated with the processing step.
-    */
   def logCurrentStepWithMessage(
       step: Long,
       channelId: ChannelIdentity,
-      message: Option[WorkflowFIFOMessage]
-  ): Unit = {
-    if (currentChannelId == channelId && message.isEmpty) {
-      return
-    }
-    currentChannelId = channelId
-    lastStep = step
-    tempLogs.append(ProcessingStep(channelId, step))
-    if (message.isDefined) {
-      tempLogs.append(MessageContent(message.get))
-    }
-  }
+      msg: Option[WorkflowFIFOMessage]
+  ): Unit
 
-  /**
-    * Called when the data processor attempts to output a message.
-    * This method retrieves all accumulated log records and passes them to the writer thread for persistence.
-    * It ensures the processing up to the current processing step is captured in the log records.
-    *
-    * @param step The current processing step.
-    * @return An array of ReplayLogRecord containing all the log records up to the current step.
-    */
-  def drainCurrentLogRecords(step: Long): Array[ReplayLogRecord] = {
-    if (lastStep != step) {
-      lastStep = step
-      tempLogs.append(ProcessingStep(currentChannelId, step))
-    }
-    val result = tempLogs.toArray
-    tempLogs.clear()
-    result
-  }
+  def markAsReplayDestination(id: EmbeddedControlMessageIdentity): Unit
 
-  def markAsReplayDestination(id: EmbeddedControlMessageIdentity): Unit = {
-    tempLogs.append(ReplayDestination(id))
-  }
+  def drainCurrentLogRecords(step: Long): Array[ReplayLogRecord]
+
 }

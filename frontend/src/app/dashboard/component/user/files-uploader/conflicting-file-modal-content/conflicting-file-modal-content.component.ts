@@ -24,7 +24,6 @@ export interface ConflictingFileModalData {
   fileName: string;
   path: string;
   size: string;
-  hint?: string;
 }
 
 @Component({

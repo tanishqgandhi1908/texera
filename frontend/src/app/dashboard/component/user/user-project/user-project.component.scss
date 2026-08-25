@@ -17,7 +17,7 @@
  * under the License.
  */
 
-@use "../../section-style" as *;
+@import "../../section-style";
 
 button {
   border-radius: 5px;

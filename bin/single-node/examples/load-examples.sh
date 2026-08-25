@@ -27,7 +27,8 @@ TEXERA_DASHBOARD_SERVICE_URL=${TEXERA_DASHBOARD_SERVICE_URL:-"http://dashboard-s
 TEXERA_FILE_SERVICE_URL=${TEXERA_FILE_SERVICE_URL:-"http://file-service:9092/api"}
 USERNAME=${TEXERA_EXAMPLE_USERNAME:-"texera"}
 PASSWORD=${TEXERA_EXAMPLE_PASSWORD:-"texera"}
-OWNER_EMAIL="$USERNAME@example.com"
+# In Texera, registration sets email = username
+OWNER_EMAIL="$USERNAME"
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DATASET_DIR="$SCRIPT_DIR/datasets"
@@ -92,7 +93,7 @@ authenticate() {
     print_status "User doesn't exist, attempting to register..."
     REGISTER_RESPONSE=$(curl -s -X POST "$TEXERA_DASHBOARD_SERVICE_URL/auth/register" \
         -H "Content-Type: application/json" \
-        -d "{\"username\": \"$USERNAME\", \"email\": \"$OWNER_EMAIL\", \"password\": \"$PASSWORD\"}")
+        -d "{\"username\": \"$USERNAME\", \"password\": \"$PASSWORD\"}")
 
     if echo "$REGISTER_RESPONSE" | grep -q '"accessToken"'; then
         TOKEN=$(echo "$REGISTER_RESPONSE" | grep -o '"accessToken":"[^"]*' | cut -d'"' -f4)

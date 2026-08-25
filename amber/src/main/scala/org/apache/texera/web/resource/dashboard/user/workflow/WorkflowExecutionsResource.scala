@@ -42,9 +42,8 @@ import org.apache.texera.dao.jooq.generated.enums.UserRoleEnum
 import org.apache.texera.dao.jooq.generated.tables.daos.WorkflowExecutionsDao
 import org.apache.texera.dao.jooq.generated.tables.pojos.{WorkflowExecutions, User => UserPojo}
 import org.apache.texera.web.model.http.request.result.ResultExportRequest
-import org.apache.texera.web.service.WarehouseReadGuard
 import org.apache.texera.web.resource.dashboard.user.workflow.WorkflowExecutionsResource._
-import org.apache.texera.web.service.ResultExportService
+import org.apache.texera.web.service.{ExecutionsMetadataPersistService, ResultExportService}
 import org.jooq.DSLContext
 import play.api.libs.json.Json
 
@@ -235,6 +234,22 @@ object WorkflowExecutionsResource {
     restrictionMap.toMap
   }
 
+  def insertOperatorPortResultUri(
+      eid: ExecutionIdentity,
+      globalPortId: GlobalPortIdentity,
+      uri: URI
+  ): Unit = {
+    context
+      .insertInto(OPERATOR_PORT_EXECUTIONS)
+      .columns(
+        OPERATOR_PORT_EXECUTIONS.WORKFLOW_EXECUTION_ID,
+        OPERATOR_PORT_EXECUTIONS.GLOBAL_PORT_ID,
+        OPERATOR_PORT_EXECUTIONS.RESULT_URI
+      )
+      .values(eid.id.toInt, globalPortId.serializeAsString, uri.toString)
+      .execute()
+  }
+
   def insertOperatorExecutions(
       eid: Long,
       opId: String,
@@ -321,9 +336,8 @@ object WorkflowExecutionsResource {
         WORKFLOW_EXECUTIONS.EID,
         WORKFLOW_EXECUTIONS.VID,
         WORKFLOW_EXECUTIONS.CUID,
-        WORKFLOW_EXECUTIONS.WHID,
         USER.NAME,
-        USER.AVATAR,
+        USER.GOOGLE_AVATAR,
         WORKFLOW_EXECUTIONS.STATUS,
         WORKFLOW_EXECUTIONS.RESULT,
         WORKFLOW_EXECUTIONS.STARTING_TIME,
@@ -381,9 +395,8 @@ object WorkflowExecutionsResource {
       .where(WORKFLOW_EXECUTIONS.EID.in(eIdsList))
       .execute()
 
-    // Clear corresponding Iceberg documents. While per-user warehouses are disabled,
-    // cleanup must not reach into them (#6930) — those URIs are skipped.
-    uris.filterNot(WarehouseReadGuard.skipWhileDisabled(_)).foreach { uri =>
+    // Clear corresponding Iceberg documents
+    uris.foreach { uri =>
       try {
         DocumentFactory.openDocument(uri)._1.clear()
       } catch {
@@ -407,7 +420,7 @@ object WorkflowExecutionsResource {
   ): Unit = {
     context
       .update(OPERATOR_PORT_EXECUTIONS)
-      .set(OPERATOR_PORT_EXECUTIONS.RESULT_SIZE, java.lang.Long.valueOf(size))
+      .set(OPERATOR_PORT_EXECUTIONS.RESULT_SIZE, Integer.valueOf(size.toInt))
       .where(OPERATOR_PORT_EXECUTIONS.WORKFLOW_EXECUTION_ID.eq(eid.id.toInt))
       .and(OPERATOR_PORT_EXECUTIONS.GLOBAL_PORT_ID.eq(globalPortId.serializeAsString))
       .execute()
@@ -427,25 +440,13 @@ object WorkflowExecutionsResource {
       .map(URI.create)
 
     if (statsUriOpt.isPresent) {
-      updateRuntimeStatsSize(
-        eid,
-        DocumentFactory.openDocument(statsUriOpt.get)._1.getTotalFileSize
-      )
+      val size = DocumentFactory.openDocument(statsUriOpt.get)._1.getTotalFileSize
+      context
+        .update(WORKFLOW_EXECUTIONS)
+        .set(WORKFLOW_EXECUTIONS.RUNTIME_STATS_SIZE, Integer.valueOf(size.toInt))
+        .where(WORKFLOW_EXECUTIONS.EID.eq(eid.id.toInt))
+        .execute()
     }
-  }
-
-  /**
-    * Stores an already-measured runtime statistics size, mirroring updateResultSize.
-    *
-    * @param eid  Execution ID associated with the runtime statistics document.
-    * @param size Size of the runtime statistics in bytes.
-    */
-  def updateRuntimeStatsSize(eid: ExecutionIdentity, size: Long): Unit = {
-    context
-      .update(WORKFLOW_EXECUTIONS)
-      .set(WORKFLOW_EXECUTIONS.RUNTIME_STATS_SIZE, java.lang.Long.valueOf(size))
-      .where(WORKFLOW_EXECUTIONS.EID.eq(eid.id.toInt))
-      .execute()
   }
 
   /**
@@ -464,28 +465,14 @@ object WorkflowExecutionsResource {
       .map(URI.create)
 
     if (uriOpt.isPresent) {
-      updateConsoleMessageSize(
-        eid,
-        opId,
-        DocumentFactory.openDocument(uriOpt.get)._1.getTotalFileSize
-      )
+      val size = DocumentFactory.openDocument(uriOpt.get)._1.getTotalFileSize
+      context
+        .update(OPERATOR_EXECUTIONS)
+        .set(OPERATOR_EXECUTIONS.CONSOLE_MESSAGES_SIZE, Integer.valueOf(size.toInt))
+        .where(OPERATOR_EXECUTIONS.WORKFLOW_EXECUTION_ID.eq(eid.id.toInt))
+        .and(OPERATOR_EXECUTIONS.OPERATOR_ID.eq(opId.id))
+        .execute()
     }
-  }
-
-  /**
-    * Stores an already-measured console message size, mirroring updateResultSize.
-    *
-    * @param eid  Execution ID associated with the console message.
-    * @param opId Operator ID of the corresponding operator.
-    * @param size Size of the console messages in bytes.
-    */
-  def updateConsoleMessageSize(eid: ExecutionIdentity, opId: OperatorIdentity, size: Long): Unit = {
-    context
-      .update(OPERATOR_EXECUTIONS)
-      .set(OPERATOR_EXECUTIONS.CONSOLE_MESSAGES_SIZE, java.lang.Long.valueOf(size))
-      .where(OPERATOR_EXECUTIONS.WORKFLOW_EXECUTION_ID.eq(eid.id.toInt))
-      .and(OPERATOR_EXECUTIONS.OPERATOR_ID.eq(opId.id))
-      .execute()
   }
 
   /**
@@ -500,12 +487,12 @@ object WorkflowExecutionsResource {
       portId: PortIdentity
   ): Option[URI] = {
     def isMatchingExternalPortURI(uri: URI): Boolean = {
-      val components = VFSURIFactory.decodeURI(uri)
-      components.globalPortId.exists { globalPortId =>
+      val (_, _, globalPortIdOption, resourceType) = VFSURIFactory.decodeURI(uri)
+      globalPortIdOption.exists { globalPortId =>
         !globalPortId.portId.internal &&
         globalPortId.opId.logicalOpId == opId &&
         globalPortId.portId == portId &&
-        components.resourceType == VFSResourceType.RESULT
+        resourceType == VFSResourceType.RESULT
       }
     }
 
@@ -526,9 +513,8 @@ object WorkflowExecutionsResource {
       eId: Integer,
       vId: Integer,
       cuId: Integer,
-      whId: Integer,
       userName: String,
-      avatar: String,
+      googleAvatar: String,
       status: Byte,
       result: String,
       startingTime: Timestamp,
@@ -585,9 +571,8 @@ class WorkflowExecutionsResource {
             WORKFLOW_EXECUTIONS.EID,
             WORKFLOW_EXECUTIONS.VID,
             WORKFLOW_EXECUTIONS.CUID,
-            WORKFLOW_EXECUTIONS.WHID,
             USER.NAME,
-            USER.AVATAR,
+            USER.GOOGLE_AVATAR,
             WORKFLOW_EXECUTIONS.STATUS,
             WORKFLOW_EXECUTIONS.RESULT,
             WORKFLOW_EXECUTIONS.STARTING_TIME,
@@ -631,25 +616,25 @@ class WorkflowExecutionsResource {
     if (!WorkflowAccessResource.hasReadAccess(wid, user.getUid)) {
       List()
     } else {
-      val logLocation = context
-        .select(WORKFLOW_EXECUTIONS.LOG_LOCATION)
-        .from(WORKFLOW_EXECUTIONS)
-        .join(WORKFLOW_VERSION)
-        .on(WORKFLOW_EXECUTIONS.VID.eq(WORKFLOW_VERSION.VID))
-        .where(WORKFLOW_EXECUTIONS.EID.eq(eid).and(WORKFLOW_VERSION.WID.eq(wid)))
-        .fetchOneInto(classOf[String])
-      if (logLocation != null && logLocation.nonEmpty) {
-        val storage =
-          SequentialRecordStorage.getStorage[ReplayLogRecord](Some(new URI(logLocation)))
-        val result = new mutable.ArrayBuffer[EmbeddedControlMessageIdentity]()
-        storage.getReader("COORDINATOR").mkRecordIterator().foreach {
-          case destination: ReplayDestination =>
-            result.append(destination.id)
-          case _ =>
-        }
-        result.map(_.id).toList
-      } else {
-        List()
+      ExecutionsMetadataPersistService.tryGetExistingExecution(
+        ExecutionIdentity(eid.longValue())
+      ) match {
+        case Some(value) =>
+          val logLocation = value.getLogLocation
+          if (logLocation != null && logLocation.nonEmpty) {
+            val storage =
+              SequentialRecordStorage.getStorage[ReplayLogRecord](Some(new URI(logLocation)))
+            val result = new mutable.ArrayBuffer[EmbeddedControlMessageIdentity]()
+            storage.getReader("CONTROLLER").mkRecordIterator().foreach {
+              case destination: ReplayDestination =>
+                result.append(destination.id)
+              case _ =>
+            }
+            result.map(_.id).toList
+          } else {
+            List()
+          }
+        case None => List()
       }
     }
   }
@@ -693,14 +678,10 @@ class WorkflowExecutionsResource {
   @GET
   @Produces(Array(MediaType.APPLICATION_JSON))
   @Path("/{wid}/stats/{eid}")
-  @RolesAllowed(Array("REGULAR", "ADMIN"))
   def retrieveWorkflowRuntimeStatistics(
       @PathParam("wid") wid: Integer,
-      @PathParam("eid") eid: Integer,
-      @Auth sessionUser: SessionUser
+      @PathParam("eid") eid: Integer
   ): List[WorkflowRuntimeStatistics] = {
-    validateUserCanAccessWorkflow(sessionUser.getUser.getUid, wid)
-
     // Create URI for runtime statistics
     val uriString: String = context
       .select(WORKFLOW_EXECUTIONS.RUNTIME_STATS_URI)
@@ -726,8 +707,6 @@ class WorkflowExecutionsResource {
     }
 
     val uri: URI = new URI(uriString)
-    // Refuse to read per-user-warehouse statistics while the feature is off (#6930).
-    WarehouseReadGuard.assertReadable(uri)
     val document = DocumentFactory.openDocument(uri)._1
 
     // Read all records from Iceberg and convert to WorkflowRuntimeStatistics
@@ -786,13 +765,6 @@ class WorkflowExecutionsResource {
     if (!WorkflowAccessResource.hasReadAccess(wid, uid))
       throw new WebApplicationException(Response.Status.UNAUTHORIZED)
   }
-
-  private def workflowAccessDeniedResponse: Response =
-    Response
-      .status(Response.Status.UNAUTHORIZED)
-      .`type`(MediaType.APPLICATION_JSON)
-      .entity(Map("error" -> "No sufficient access privilege.").asJava)
-      .build()
 
   /** Delete a group of executions */
   @PUT
@@ -857,22 +829,18 @@ class WorkflowExecutionsResource {
   @Path("/result/export/dataset")
   @RolesAllowed(Array("REGULAR", "ADMIN"))
   def exportResultToDataset(request: ResultExportRequest, @Auth user: SessionUser): Response = {
-    if (!WorkflowAccessResource.hasReadAccess(request.workflowId, user.getUser.getUid)) {
-      workflowAccessDeniedResponse
-    } else {
-      try {
-        val resultExportService =
-          new ResultExportService(WorkflowIdentity(request.workflowId), request.computingUnitId)
-        resultExportService.exportToDataset(user.user, request)
+    try {
+      val resultExportService =
+        new ResultExportService(WorkflowIdentity(request.workflowId), request.computingUnitId)
+      resultExportService.exportToDataset(user.user, request)
 
-      } catch {
-        case ex: Exception =>
-          Response
-            .status(Response.Status.INTERNAL_SERVER_ERROR)
-            .`type`(MediaType.APPLICATION_JSON)
-            .entity(Map("error" -> ex.getMessage).asJava)
-            .build()
-      }
+    } catch {
+      case ex: Exception =>
+        Response
+          .status(Response.Status.INTERNAL_SERVER_ERROR)
+          .`type`(MediaType.APPLICATION_JSON)
+          .entity(Map("error" -> ex.getMessage).asJava)
+          .build()
     }
   }
 
@@ -886,24 +854,21 @@ class WorkflowExecutionsResource {
 
     try {
       val userOpt = JwtParser.parseToken(token)
-      if (!userOpt.isPresent) {
+      if (userOpt.isPresent) {
+        val user = userOpt.get()
+        val role = user.getUser.getRole
+        val RolesAllowed = Set(UserRoleEnum.REGULAR, UserRoleEnum.ADMIN)
+        if (!RolesAllowed.contains(role)) {
+          throw new RuntimeException("User role is not allowed to perform this download")
+        }
+      } else {
         throw new RuntimeException("Invalid or expired token")
-      }
-      val user = userOpt.get()
-      val role = user.getUser.getRole
-      val RolesAllowed = Set(UserRoleEnum.REGULAR, UserRoleEnum.ADMIN)
-      if (!RolesAllowed.contains(role)) {
-        throw new RuntimeException("User role is not allowed to perform this download")
       }
 
       val request = Json.parse(requestJson).as[ResultExportRequest]
-      if (!WorkflowAccessResource.hasReadAccess(request.workflowId, user.getUser.getUid)) {
-        workflowAccessDeniedResponse
-      } else {
-        val resultExportService =
-          new ResultExportService(WorkflowIdentity(request.workflowId), request.computingUnitId)
-        resultExportService.exportToLocal(request)
-      }
+      val resultExportService =
+        new ResultExportService(WorkflowIdentity(request.workflowId), request.computingUnitId)
+      resultExportService.exportToLocal(request)
 
     } catch {
       case ex: Exception =>

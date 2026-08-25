@@ -23,6 +23,7 @@ import { UdfDebugService } from "../../../service/operator-debug/udf-debug.servi
 import { isDefined } from "../../../../common/util/predicate";
 import { NgIf, NgStyle } from "@angular/common";
 import { FormsModule } from "@angular/forms";
+import { FormlyRepeatDndComponent } from "../../../../common/formly/repeat-dnd/repeat-dnd.component";
 
 type MonacoEditor = editor.IStandaloneCodeEditor;
 
@@ -33,7 +34,7 @@ type MonacoEditor = editor.IStandaloneCodeEditor;
   selector: "texera-breakpoint-condition-input",
   templateUrl: "./breakpoint-condition-input.component.html",
   styleUrls: ["./breakpoint-condition-input.component.scss"],
-  imports: [NgIf, NgStyle, FormsModule],
+  imports: [NgIf, NgStyle, FormsModule, FormlyRepeatDndComponent],
 })
 export class BreakpointConditionInputComponent implements OnChanges {
   constructor(private udfDebugService: UdfDebugService) {}

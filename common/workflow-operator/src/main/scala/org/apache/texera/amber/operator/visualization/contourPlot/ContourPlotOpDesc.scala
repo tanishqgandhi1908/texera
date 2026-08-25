@@ -20,11 +20,10 @@
 package org.apache.texera.amber.operator.visualization.contourPlot
 
 import com.fasterxml.jackson.annotation.{JsonProperty, JsonPropertyDescription}
-import com.fasterxml.jackson.databind.annotation.JsonDeserialize
-import com.kjetland.jackson.jsonSchema.annotations.{JsonSchemaInject, JsonSchemaTitle}
+import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaTitle
 import org.apache.texera.amber.core.tuple.{AttributeType, Schema}
 import org.apache.texera.amber.pybuilder.PythonTemplateBuilder.PythonTemplateBuilderStringContext
-import org.apache.texera.amber.pybuilder.PyStringTypes.{EncodableString, PythonLiteral}
+import org.apache.texera.amber.pybuilder.PyStringTypes.EncodableString
 import org.apache.texera.amber.core.workflow.PortIdentity
 import org.apache.texera.amber.operator.PythonOperatorDescriptor
 import org.apache.texera.amber.operator.metadata.annotations.AutofillAttributeName
@@ -32,17 +31,6 @@ import org.apache.texera.amber.operator.metadata.{OperatorGroupConstants, Operat
 
 import javax.validation.constraints.NotNull
 
-// type constraint: x / y / z are plotted on numeric axes and interpolated via
-// scipy.griddata, so they can only be numeric columns.
-@JsonSchemaInject(json = """
-{
-  "attributeTypeRules": {
-    "x": { "enum": ["integer", "long", "double"] },
-    "y": { "enum": ["integer", "long", "double"] },
-    "z": { "enum": ["integer", "long", "double"] }
-  }
-}
-""")
 class ContourPlotOpDesc extends PythonOperatorDescriptor {
 
   @JsonProperty(value = "x", required = true)
@@ -66,13 +54,10 @@ class ContourPlotOpDesc extends PythonOperatorDescriptor {
   @NotNull(message = "z cannot be empty")
   var z: EncodableString = ""
 
-  // Numeric: only used as int(). contentAs names the boxed class — Option erases
-  // its element type, and a blank must not read as 0.
   @JsonProperty(required = false, defaultValue = "10")
   @JsonSchemaTitle("Grid Size")
   @JsonPropertyDescription("Grid resolution of the final image")
-  @JsonDeserialize(contentAs = classOf[Integer])
-  var gridSize: Option[Int] = None
+  var gridSize: EncodableString = ""
 
   @JsonProperty(required = false, defaultValue = "true")
   @JsonSchemaTitle("Connect Gaps")
@@ -102,9 +87,6 @@ class ContourPlotOpDesc extends PythonOperatorDescriptor {
     )
 
   override def generatePythonCode(): String = {
-    // A number in the generated code, so it needs no int() around it.
-    val gridSizeLiteral: PythonLiteral =
-      gridSize.getOrElse(ContourPlotOpDesc.DefaultGridSize).toString
     pyb"""from pytexera import *
        |import numpy as np
        |import plotly.graph_objects as go
@@ -118,7 +100,7 @@ class ContourPlotOpDesc extends PythonOperatorDescriptor {
        |        x = table[$x].values
        |        y = table[$y].values
        |        z = table[$z].values
-       |        grid_size = $gridSizeLiteral
+       |        grid_size = int($gridSize)
        |        connGaps = True if '$connectGaps' == 'true' else False
        |
        |        grid_x, grid_y = np.meshgrid(np.linspace(min(x), max(x), grid_size), np.linspace(min(y), max(y), grid_size))
@@ -137,10 +119,4 @@ class ContourPlotOpDesc extends PythonOperatorDescriptor {
        |        yield {'html-content': html}
        |""".encode
   }
-}
-
-object ContourPlotOpDesc {
-
-  /** Matches the form's `defaultValue`, so an unset Grid Size plots at 10. */
-  private val DefaultGridSize: Int = 10
 }

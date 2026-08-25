@@ -33,5 +33,7 @@ class SessionUser(val user: User) extends Principal {
 
   def getEmail: String = user.getEmail
 
+  def getGoogleId: String = user.getGoogleId
+
   def isRoleOf(role: UserRoleEnum): Boolean = user.getRole == role
 }

@@ -21,15 +21,22 @@ package org.apache.texera.service
 
 import com.fasterxml.jackson.module.scala.DefaultScalaModule
 import com.typesafe.scalalogging.LazyLogging
+import io.dropwizard.auth.AuthDynamicFeature
 import io.dropwizard.configuration.{EnvironmentVariableSubstitutor, SubstitutingSourceProvider}
 import io.dropwizard.core.Application
 import io.dropwizard.core.setup.{Bootstrap, Environment}
-import org.apache.texera.auth.{AuthFeatures, RequestLoggingFilter, RoleAnnotationEnforcer}
+import org.apache.texera.auth.{
+  JwtAuthFilter,
+  RequestLoggingFilter,
+  SessionUser,
+  UnauthorizedExceptionMapper
+}
 import org.apache.texera.common.config.{DefaultsConfig, StorageConfig}
-import org.apache.texera.dao.{SiteSettings, SqlServer}
-import org.apache.texera.dao.jooq.generated.Tables.SITE_SETTINGS
+import org.apache.texera.dao.SqlServer
 import org.apache.texera.service.resource.{ConfigResource, HealthCheckResource}
 import org.eclipse.jetty.server.session.SessionHandler
+import org.glassfish.jersey.server.filter.RolesAllowedDynamicFeature
+import org.jooq.impl.DSL
 
 import java.nio.file.Path
 
@@ -61,11 +68,9 @@ class ConfigService extends Application[ConfigServiceConfiguration] with LazyLog
 
     environment.jersey.register(classOf[HealthCheckResource])
 
-    AuthFeatures.register(environment)
+    ConfigService.registerAuthFeatures(environment)
 
     environment.jersey.register(new ConfigResource)
-
-    RoleAnnotationEnforcer.enforce(environment.jersey.getResourceConfig, "ConfigService")
 
     // Preload default.conf into site_setting tables
     try {
@@ -73,12 +78,22 @@ class ConfigService extends Application[ConfigServiceConfiguration] with LazyLog
 
       SqlServer.withTransaction(ctx) { tx =>
         if (DefaultsConfig.reinit) {
-          tx.deleteFrom(SITE_SETTINGS).execute()
+          tx.deleteFrom(DSL.table("site_settings")).execute()
         }
 
         DefaultsConfig.allDefaults.foreach {
           case (key, value) =>
-            SiteSettings.insertIfAbsent(tx, key, value, "texera")
+            tx
+              .insertInto(DSL.table("site_settings"))
+              .columns(
+                DSL.field("key"),
+                DSL.field("value"),
+                DSL.field("updated_by"),
+                DSL.field("updated_at")
+              )
+              .values(key, value, "texera", DSL.currentTimestamp())
+              .onDuplicateKeyIgnore()
+              .execute()
         }
       }
     } catch {
@@ -93,6 +108,24 @@ class ConfigService extends Application[ConfigServiceConfiguration] with LazyLog
 }
 
 object ConfigService {
+  // Registers JWT auth, @Auth injection, and @RolesAllowed enforcement.
+  // Mirrors ComputingUnitManagingService.registerAuthFeatures and
+  // WorkflowCompilingService.registerAuthFeatures so the three services
+  // don't drift apart.
+  def registerAuthFeatures(environment: Environment): Unit = {
+    // Register JWT authentication filter
+    environment.jersey.register(new AuthDynamicFeature(classOf[JwtAuthFilter]))
+    environment.jersey.register(classOf[UnauthorizedExceptionMapper])
+
+    // Enable @Auth annotation for injecting SessionUser
+    environment.jersey.register(
+      new io.dropwizard.auth.AuthValueFactoryProvider.Binder(classOf[SessionUser])
+    )
+
+    // Enforce @RolesAllowed annotations on resource methods
+    environment.jersey.register(classOf[RolesAllowedDynamicFeature])
+  }
+
   def main(args: Array[String]): Unit = {
     val configFilePath = Path
       .of(sys.env.getOrElse("TEXERA_HOME", "."))

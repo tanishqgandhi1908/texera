@@ -28,7 +28,7 @@ import org.apache.texera.amber.core.tuple.Tuple
 import org.apache.texera.amber.core.workflow.WorkflowContext
 import org.apache.texera.amber.core.workflowruntimestate.FatalErrorType.EXECUTION_FAILURE
 import org.apache.texera.amber.core.workflowruntimestate.WorkflowFatalError
-import org.apache.texera.amber.engine.architecture.coordinator.{
+import org.apache.texera.amber.engine.architecture.controller.{
   ExecutionStateUpdate,
   ExecutionStatsUpdate,
   FatalError,
@@ -78,8 +78,7 @@ class ExecutionStatsService(
     val thread = Executors.newSingleThreadExecutor()
     val uri = VFSURIFactory.createRuntimeStatisticsURI(
       workflowContext.workflowId,
-      workflowContext.executionId,
-      warehouse = workflowContext.warehouse
+      workflowContext.executionId
     )
     val writer = DocumentFactory
       .createDocument(uri, ResultSchema.runtimeStatisticsSchema)

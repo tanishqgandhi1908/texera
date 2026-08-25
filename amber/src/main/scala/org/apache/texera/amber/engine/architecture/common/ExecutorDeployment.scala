@@ -21,8 +21,8 @@ package org.apache.texera.amber.engine.architecture.common
 
 import org.apache.pekko.actor.{Address, Deploy}
 import org.apache.pekko.remote.RemoteScope
-import org.apache.texera.amber.core.workflow.{PhysicalOp, PreferCoordinator, RoundRobinPreference}
-import org.apache.texera.amber.engine.architecture.coordinator.execution.OperatorExecution
+import org.apache.texera.amber.core.workflow.{PhysicalOp, PreferController, RoundRobinPreference}
+import org.apache.texera.amber.engine.architecture.controller.execution.OperatorExecution
 import org.apache.texera.amber.engine.architecture.deploysemantics.AddressInfo
 import org.apache.texera.amber.engine.architecture.pythonworker.PythonWorkflowWorker
 import org.apache.texera.amber.engine.architecture.scheduling.config.OperatorConfig
@@ -38,7 +38,7 @@ object ExecutorDeployment {
 
   def createWorkers(
       op: PhysicalOp,
-      coordinatorActorService: PekkoActorService,
+      controllerActorService: PekkoActorService,
       operatorExecution: OperatorExecution,
       operatorConfig: OperatorConfig,
       stateRestoreConfig: Option[StateRestoreConfig],
@@ -46,8 +46,8 @@ object ExecutorDeployment {
   ): Unit = {
 
     val addressInfo = AddressInfo(
-      coordinatorActorService.getClusterNodeAddresses,
-      coordinatorActorService.self.path.address
+      controllerActorService.getClusterNodeAddresses,
+      controllerActorService.self.path.address
     )
 
     operatorConfig.workerConfigs.foreach(workerConfig => {
@@ -61,8 +61,8 @@ object ExecutorDeployment {
         )
       val locationPreference = op.locationPreference.getOrElse(RoundRobinPreference)
       val preferredAddress: Address = locationPreference match {
-        case PreferCoordinator =>
-          addressInfo.coordinatorAddress
+        case PreferController =>
+          addressInfo.controllerAddress
         case RoundRobinPreference =>
           assert(
             addressInfo.allAddresses.nonEmpty,
@@ -83,8 +83,8 @@ object ExecutorDeployment {
         )
       }
       // Note: At this point, we don't know if the actor is fully initialized.
-      // Thus, the ActorRef returned from `coordinatorActorService.actorOf` is ignored.
-      coordinatorActorService.actorOf(
+      // Thus, the ActorRef returned from `controllerActorService.actorOf` is ignored.
+      controllerActorService.actorOf(
         workflowWorker.withDeploy(Deploy(scope = RemoteScope(preferredAddress)))
       )
       operatorExecution.initWorkerExecution(workerId)

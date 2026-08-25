@@ -31,15 +31,11 @@ import org.apache.texera.amber.operator.{LogicalOp, PortDescription, StateTransf
 
 import scala.util.{Success, Try}
 
-class PythonUDFOpDescV2 extends LogicalOp with PythonUdfUiParameterSupport {
+class PythonUDFOpDescV2 extends LogicalOp {
   @JsonProperty(
     required = true,
     defaultValue =
       "# Choose from the following templates:\n" +
-        "# \n" +
-        "# Define UiParameter inside open() of ProcessTupleOperator, ProcessBatchOperator, or ProcessTableOperator.\n" +
-        "# Example: self.count = self.UiParameter(\"count\", AttributeType.INT).value\n" +
-        "# See the Python UDF operator documentation for supported types and behavior.\n" +
         "# \n" +
         "# from pytexera import *\n" +
         "# \n" +
@@ -106,7 +102,6 @@ class PythonUDFOpDescV2 extends LogicalOp with PythonUdfUiParameterSupport {
     } else {
       opInfo.inputPorts.map(_ => None)
     }
-    val codeWithParameters = injectUiParameters(code)
 
     val propagateSchema = (inputSchemas: Map[PortIdentity, Schema]) => {
       val inputSchema = inputSchemas(operatorInfo.inputPorts.head.id)
@@ -135,7 +130,7 @@ class PythonUDFOpDescV2 extends LogicalOp with PythonUdfUiParameterSupport {
           workflowId,
           executionId,
           operatorIdentifier,
-          OpExecWithCode(codeWithParameters, "python")
+          OpExecWithCode(code, "python")
         )
         .withParallelizable(true)
         .withSuggestedWorkerNum(workers)
@@ -145,7 +140,7 @@ class PythonUDFOpDescV2 extends LogicalOp with PythonUdfUiParameterSupport {
           workflowId,
           executionId,
           operatorIdentifier,
-          OpExecWithCode(codeWithParameters, "python")
+          OpExecWithCode(code, "python")
         )
         .withParallelizable(false)
     }

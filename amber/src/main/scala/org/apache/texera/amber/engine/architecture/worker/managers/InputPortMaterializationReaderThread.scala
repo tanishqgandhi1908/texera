@@ -104,17 +104,9 @@ class InputPortMaterializationReaderThread(
           .asInstanceOf[VirtualDocument[Tuple]]
       val stateReadIterator = stateDocument.get()
       while (stateReadIterator.hasNext) {
-        val row = stateReadIterator.next()
-        // Rebuild the loop envelope (loop_counter / loop_start_id) alongside
-        // the content: a JVM operator inside a loop body must carry it through
-        // unchanged, or the matching LoopEnd loses its back-jump target.
-        val stateFrame = StateFrame(
-          State.fromTuple(row),
-          State.loopCounterFrom(row),
-          State.loopStartIdFrom(row)
-        )
+        val state = State.fromTuple(stateReadIterator.next())
         inputMessageQueue.put(
-          FIFOMessageElement(WorkflowFIFOMessage(channelId, getSequenceNumber, stateFrame))
+          FIFOMessageElement(WorkflowFIFOMessage(channelId, getSequenceNumber, StateFrame(state)))
         )
       }
 

@@ -34,36 +34,23 @@ type AmberConfig = Pick<GuiConfig, "defaultDataTransferBatchSize">;
 type GuiOnlyConfig = Omit<GuiConfig, keyof PreLoginConfig | keyof AmberConfig | "inviteOnly">;
 type UserSystemConfig = Pick<GuiConfig, "inviteOnly">;
 
-// One entry per backend config endpoint.
-export type ConfigSource = "preLogin" | "gui" | "amber" | "userSystem";
-
 @Injectable({ providedIn: "root" })
 export class GuiConfigService {
-  // Each endpoint's payload, kept under its own key.
-  private configBySource: Partial<Record<ConfigSource, Partial<GuiConfig>>> = {};
-
-  // Memoized flat merge. Rebuilt only when a source is written so that env
-  // returns a stable reference: callers read env on every change-detection
-  // cycle, and one call site mutates env through a two-way [(ngModel)] binding,
-  // which only persists when the object identity is held across reads.
-  private mergedCache: GuiConfig | null = null;
-
-  // Merge precedence when a key appears in multiple sources (later wins).
-  private static readonly MERGE_ORDER: ConfigSource[] = ["preLogin", "gui", "amber", "userSystem"];
+  private config: Partial<GuiConfig> = {};
 
   constructor(private http: HttpClient) {}
 
   /**
    * APP_INITIALIZER entry point. Always loads /config/pre-login (anonymous). If
    * a JWT is already in localStorage (browser reload while logged in), chains
-   * /config/gui + /config/amber + /config/user-system in the same await so the
-   * full config is available before any post-login component mounts.
+   * /config/gui + /config/user-system in the same await so the full config is
+   * available before any post-login component mounts.
    */
   load(): Observable<Partial<GuiConfig>> {
     return this.loadPreLogin().pipe(
       switchMap(() => {
         if (!GuiConfigService.hasStoredAccessToken()) {
-          return of(this.env);
+          return of(this.config);
         }
         return this.loadPostLogin().pipe(
           // Expired or malformed token → /config/gui returns 403. Continue
@@ -71,7 +58,7 @@ export class GuiConfigService {
           // expiry on its own, so we shouldn't block bootstrap on it.
           catchError((err: unknown) => {
             console.warn("Failed to load authenticated config; continuing with pre-login only.", err);
-            return of(this.env);
+            return of(this.config);
           })
         );
       })
@@ -81,9 +68,9 @@ export class GuiConfigService {
   loadPreLogin(): Observable<Partial<GuiConfig>> {
     return this.http.get<PreLoginConfig>(`${AppSettings.getApiEndpoint()}/config/pre-login`).pipe(
       tap(preLogin => {
-        this.setSource("preLogin", preLogin);
+        this.config = { ...this.config, ...preLogin };
       }),
-      map(() => this.env),
+      map(() => this.config),
       catchError((error: unknown) => {
         console.error("Failed to load pre-login configuration:", error);
         return throwError(() => new Error(`Failed to load pre-login configuration from backend: ${error}`));
@@ -93,7 +80,7 @@ export class GuiConfigService {
 
   /**
    * Fetches the authenticated portion of the configuration. Runs after the
-   * frontend has a valid JWT, called from APP_INITIALIZER on bootstrap when a
+   * frontend has a valid JWT — called from APP_INITIALIZER on bootstrap when a
    * stored token exists, and from UserService.handleAccessToken on fresh login.
    */
   loadPostLogin(): Observable<Partial<GuiConfig>> {
@@ -102,35 +89,14 @@ export class GuiConfigService {
     const userSystemConfig$ = this.http.get<UserSystemConfig>(`${AppSettings.getApiEndpoint()}/config/user-system`);
     return forkJoin([guiConfig$, amberConfig$, userSystemConfig$]).pipe(
       tap(([guiConfig, amberConfig, userSystemConfig]) => {
-        this.setSource("gui", guiConfig);
-        this.setSource("amber", amberConfig);
-        this.setSource("userSystem", userSystemConfig);
+        this.config = { ...this.config, ...guiConfig, ...amberConfig, ...userSystemConfig };
       }),
-      map(() => this.env)
+      map(() => this.config)
     );
   }
 
-  // Flat merge of all sources, memoized so reads return a stable reference.
   get env(): GuiConfig {
-    if (this.mergedCache === null) {
-      this.mergedCache = GuiConfigService.MERGE_ORDER.reduce(
-        (merged, source) => ({ ...merged, ...this.configBySource[source] }),
-        {} as Partial<GuiConfig>
-      ) as GuiConfig;
-    }
-    return this.mergedCache;
-  }
-
-  // One endpoint's payload, in isolation. Returns a shallow copy so callers
-  // cannot mutate the stored source and desync it from the memoized env view.
-  source(name: ConfigSource): Partial<GuiConfig> {
-    return { ...(this.configBySource[name] ?? {}) };
-  }
-
-  // Store a source payload and invalidate the merged view.
-  private setSource(name: ConfigSource, payload: Partial<GuiConfig>): void {
-    this.configBySource[name] = payload;
-    this.mergedCache = null;
+    return this.config as GuiConfig;
   }
 
   private static hasStoredAccessToken(): boolean {

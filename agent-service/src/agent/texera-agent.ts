@@ -75,11 +75,11 @@ type ReActStepCallback = (step: ReActStep) => void;
 /**
  * A single Texera agent instance.
  *
- * Owns the conversation (ReAct step tree with HEAD tracking), the
+ * Owns the conversation (ReAct step tree with HEAD/checkout semantics), the
  * workflow being edited (`WorkflowState`), cached operator execution results
  * (`WorkflowResultState`), and the tool surface exposed to the LLM. Each call
  * to `sendMessage` drives one multi-step generation via the Vercel AI SDK,
- * streaming step updates to subscribed clients.
+ * streaming step updates to subscribed websockets.
  */
 export class TexeraAgent {
   readonly agentId: string;
@@ -95,7 +95,7 @@ export class TexeraAgent {
   private stepCounter = 0;
   private workflowResultState: WorkflowResultState;
 
-  private clients: Set<any> = new Set();
+  private websockets: Set<any> = new Set();
 
   private model: LanguageModel;
   private systemPrompt: string;
@@ -266,16 +266,16 @@ export class TexeraAgent {
     return this.workflowResultState;
   }
 
-  getClients(): Set<any> {
-    return this.clients;
+  getWebsockets(): Set<any> {
+    return this.websockets;
   }
 
-  addClient(ws: any): void {
-    this.clients.add(ws);
+  addWebsocket(ws: any): void {
+    this.websockets.add(ws);
   }
 
-  removeClient(ws: any): void {
-    this.clients.delete(ws);
+  removeWebsocket(ws: any): void {
+    this.websockets.delete(ws);
   }
 
   getReActSteps(): ReActStep[] {
@@ -296,6 +296,16 @@ export class TexeraAgent {
 
   getAllSteps(): ReActStep[] {
     return Array.from(this.stepsById.values()).filter(s => s.id !== INITIAL_STEP_ID);
+  }
+
+  checkout(stepId: string): boolean {
+    const step = this.stepsById.get(stepId);
+    if (!step && stepId !== INITIAL_STEP_ID) return false;
+    this.head = stepId;
+    if (step?.afterWorkflowContent) {
+      this.workflowState.setWorkflowContent(step.afterWorkflowContent);
+    }
+    return true;
   }
 
   setStepCallback(callback: ReActStepCallback | null): void {
@@ -821,7 +831,7 @@ export class TexeraAgent {
 
     this.workflowState.destroy();
 
-    this.clients.clear();
+    this.websockets.clear();
 
     this.reActStepsByMessageId.clear();
     this.stepsById.clear();

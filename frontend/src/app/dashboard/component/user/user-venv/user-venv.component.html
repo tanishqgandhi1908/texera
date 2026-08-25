@@ -157,9 +157,8 @@
               nzType="default"
               nzShape="circle"
               nzDanger
-              nz-popconfirm
-              nzPopconfirmTitle="Confirm to delete this package."
-              (nzOnConfirm)="removePackage(i)">
+              [class.highlighted-btn]="pkg.deleteToggle"
+              (click)="togglePackageDelete(pkg)">
               <i
                 nz-icon
                 nzType="delete"></i>

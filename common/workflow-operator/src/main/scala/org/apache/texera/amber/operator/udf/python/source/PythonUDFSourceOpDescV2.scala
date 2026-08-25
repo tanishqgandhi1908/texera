@@ -27,17 +27,12 @@ import org.apache.texera.amber.core.virtualidentity.{ExecutionIdentity, Workflow
 import org.apache.texera.amber.core.workflow.{OutputPort, PhysicalOp, SchemaPropagationFunc}
 import org.apache.texera.amber.operator.metadata.{OperatorGroupConstants, OperatorInfo}
 import org.apache.texera.amber.operator.source.SourceOperatorDescriptor
-import org.apache.texera.amber.operator.udf.python.PythonUdfUiParameterSupport
 
-class PythonUDFSourceOpDescV2 extends SourceOperatorDescriptor with PythonUdfUiParameterSupport {
+class PythonUDFSourceOpDescV2 extends SourceOperatorDescriptor {
 
   @JsonProperty(
     required = true,
-    defaultValue = "# Define UiParameter inside GenerateOperator.open().\n" +
-      "# Example: self.count = self.UiParameter(\"count\", AttributeType.INT).value\n" +
-      "# See the Python UDF operator documentation for supported types and behavior.\n" +
-      "# \n" +
-      "# from pytexera import *\n" +
+    defaultValue = "# from pytexera import *\n" +
       "# class GenerateOperator(UDFSourceOperator):\n" +
       "# \n" +
       "#     @overrides\n" +
@@ -87,15 +82,9 @@ class PythonUDFSourceOpDescV2 extends SourceOperatorDescriptor with PythonUdfUiP
           )
         trimmed
       }
-    val codeWithParameters = injectUiParameters(code)
 
     val physicalOp = PhysicalOp
-      .sourcePhysicalOp(
-        workflowId,
-        executionId,
-        operatorIdentifier,
-        OpExecWithCode(codeWithParameters, "python")
-      )
+      .sourcePhysicalOp(workflowId, executionId, operatorIdentifier, OpExecWithCode(code, "python"))
       .withInputPorts(operatorInfo.inputPorts)
       .withOutputPorts(operatorInfo.outputPorts)
       .withIsOneToManyOp(true)

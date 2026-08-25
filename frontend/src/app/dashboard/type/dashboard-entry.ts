@@ -33,7 +33,7 @@ import { EntityType } from "../../hub/service/hub.service";
 
 export interface UserInfo {
   userName: string;
-  avatar?: string;
+  googleAvatar?: string;
 }
 
 export class DashboardEntry {
@@ -47,7 +47,7 @@ export class DashboardEntry {
   accessLevel: string | undefined;
   ownerName: string | undefined;
   ownerEmail: string | undefined;
-  ownerAvatar: string | undefined;
+  ownerGoogleAvatar: string | undefined;
   ownerId: number | undefined;
   size: number | undefined;
   viewCount: number;
@@ -75,7 +75,7 @@ export class DashboardEntry {
       this.accessLevel = value.accessLevel;
       this.ownerName = value.ownerName;
       this.ownerEmail = "";
-      this.ownerAvatar = "";
+      this.ownerGoogleAvatar = "";
       this.ownerId = value.ownerId;
       this.size = 0;
       this.viewCount = 0;
@@ -83,7 +83,6 @@ export class DashboardEntry {
       this.likeCount = 0;
       this.isLiked = false;
       this.accessibleUserIds = [];
-      this.coverImageUrl = value.coverImage ?? undefined;
     } else if (isDashboardProject(value)) {
       this.type = EntityType.Project;
       this.id = value.pid;
@@ -94,7 +93,7 @@ export class DashboardEntry {
       this.accessLevel = value.accessLevel;
       this.ownerName = "";
       this.ownerEmail = "";
-      this.ownerAvatar = "";
+      this.ownerGoogleAvatar = "";
       this.ownerId = value.ownerId;
       this.size = 0;
       this.viewCount = 0;
@@ -112,7 +111,7 @@ export class DashboardEntry {
       this.accessLevel = value.accessLevel;
       this.ownerName = "";
       this.ownerEmail = value.ownerEmail;
-      this.ownerAvatar = "";
+      this.ownerGoogleAvatar = "";
       this.ownerId = value.file.ownerUid;
       this.size = value.file.size;
       this.viewCount = 0;
@@ -130,7 +129,7 @@ export class DashboardEntry {
       this.accessLevel = value.accessPrivilege;
       this.ownerName = "";
       this.ownerEmail = value.ownerEmail;
-      this.ownerAvatar = "";
+      this.ownerGoogleAvatar = "";
       this.ownerId = value.dataset.ownerUid;
       this.size = value.size;
       this.viewCount = 0;
@@ -146,7 +145,7 @@ export class DashboardEntry {
       this.creationTime = value.computingUnit.creationTime;
       this.accessLevel = value.accessPrivilege;
       this.ownerName = "";
-      this.ownerAvatar = "";
+      this.ownerGoogleAvatar = "";
       this.ownerId = value.computingUnit.uid;
       this.viewCount = 0;
       this.cloneCount = 0;
@@ -162,8 +161,8 @@ export class DashboardEntry {
     this.ownerName = ownerName;
   }
 
-  setOwnerAvatar(ownerAvatar: string): void {
-    this.ownerAvatar = ownerAvatar;
+  setOwnerGoogleAvatar(ownerGoogleAvatar: string): void {
+    this.ownerGoogleAvatar = ownerGoogleAvatar;
   }
 
   setCount(viewCount: number, cloneCount: number, likeCount: number): void {

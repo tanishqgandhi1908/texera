@@ -21,8 +21,8 @@ package org.apache.texera.amber.engine.architecture.deploysemantics
 
 import org.apache.pekko.actor.Address
 
-// Holds worker and coordinator node addresses.
+// Holds worker and controller node addresses.
 case class AddressInfo(
     allAddresses: Array[Address], // e.g., Node 1, Node 2, Node 3
-    coordinatorAddress: Address // Coordinator node
+    controllerAddress: Address // Controller node
 )

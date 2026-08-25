@@ -56,7 +56,7 @@ class ProjectionOpDesc extends MapOpDesc {
       .withOutputPorts(operatorInfo.outputPorts)
       .withDerivePartition(derivePartition())
       .withPropagateSchema(SchemaPropagationFunc(inputSchemas => {
-        require(attributes.nonEmpty, "Please select at least one attribute to project.")
+        require(attributes.nonEmpty, "Attributes must not be empty")
 
         val inputSchema = inputSchemas.values.head
         val outputSchema = if (!isDrop) {

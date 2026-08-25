@@ -24,7 +24,7 @@ export interface WorkflowExecutionsEntry {
   cuId: number;
   sId: number;
   userName: string;
-  avatar: string;
+  googleAvatar: string;
   name: string;
   startingTime: number;
   completionTime: number;

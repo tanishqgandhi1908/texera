@@ -17,16 +17,38 @@
  * under the License.
  */
 
-import { Component } from "@angular/core";
+import { Component, OnInit } from "@angular/core";
+import { UntilDestroy, untilDestroyed } from "@ngneat/until-destroy";
+import { UserService } from "src/app/common/service/user/user.service";
+import { BehaviorSubject } from "rxjs";
+import { GuiConfigService } from "../../../common/service/gui-config.service";
 import { NzRowDirective, NzColDirective } from "ng-zorro-antd/grid";
+import { NgIf, AsyncPipe } from "@angular/common";
+import { LocalLoginComponent } from "./local-login/local-login.component";
 
-/**
- * Static marketing copy for the platform.
- */
+@UntilDestroy()
 @Component({
   selector: "texera-about",
   templateUrl: "./about.component.html",
   styleUrls: ["./about.component.scss"],
-  imports: [NzRowDirective, NzColDirective],
+  imports: [NzRowDirective, NzColDirective, NgIf, LocalLoginComponent, AsyncPipe],
 })
-export class AboutComponent {}
+export class AboutComponent implements OnInit {
+  isLogin$ = new BehaviorSubject<boolean>(false); // control the visibility of the local login component
+
+  constructor(
+    private userService: UserService,
+    protected config: GuiConfigService
+  ) {}
+
+  ngOnInit() {
+    this.isLogin$.next(this.userService.isLogin());
+    // Subscribe to user changes
+    this.userService
+      .userChanged()
+      .pipe(untilDestroyed(this))
+      .subscribe(user => {
+        this.isLogin$.next(user !== undefined);
+      });
+  }
+}

@@ -18,10 +18,9 @@
  */
 
 import { Injectable } from "@angular/core";
-import { BehaviorSubject, Observable, Subject } from "rxjs";
+import { Observable, Subject } from "rxjs";
 import { OperatorState, OperatorStatistics } from "../../types/execute-workflow.interface";
 import { WorkflowWebsocketService } from "../workflow-websocket/workflow-websocket.service";
-import { OperatorPerformanceMetrics, extractPerformanceMetrics } from "./performance-metrics";
 
 @Injectable({
   providedIn: "root",
@@ -31,18 +30,8 @@ export class WorkflowStatusService {
   private statusSubject = new Subject<Record<string, OperatorStatistics>>();
   private currentStatus: Record<string, OperatorStatistics> = {};
 
-  // Derived, ground-truth performance metrics for the heat-map overlay. Backed by
-  // a BehaviorSubject so a consumer that subscribes after a run already streamed
-  // (e.g. the overlay toggled on mid/post-run) still receives the latest value.
-  private performanceMetricsSubject = new BehaviorSubject<Record<string, OperatorPerformanceMetrics>>({});
-
   constructor(private workflowWebsocketService: WorkflowWebsocketService) {
-    // Single derivation path: every status emission (websocket, reset, clear, or
-    // externally fed historical stats) recomputes the performance metrics.
-    this.getStatusUpdateStream().subscribe(status => {
-      this.currentStatus = status;
-      this.performanceMetricsSubject.next(this.buildPerformanceMetrics(status));
-    });
+    this.getStatusUpdateStream().subscribe(event => (this.currentStatus = event));
 
     this.workflowWebsocketService.websocketEvent().subscribe(event => {
       if (event.type !== "OperatorStatisticsUpdateEvent") {
@@ -58,26 +47,6 @@ export class WorkflowStatusService {
 
   public getCurrentStatus(): Record<string, OperatorStatistics> {
     return this.currentStatus;
-  }
-
-  /** Stream of derived per-operator performance metrics, keyed by operator id. */
-  public getPerformanceMetricsStream(): Observable<Record<string, OperatorPerformanceMetrics>> {
-    return this.performanceMetricsSubject.asObservable();
-  }
-
-  /** Synchronous snapshot of the latest derived per-operator performance metrics. */
-  public getCurrentPerformanceMetrics(): Record<string, OperatorPerformanceMetrics> {
-    return this.performanceMetricsSubject.getValue();
-  }
-
-  private buildPerformanceMetrics(
-    status: Record<string, OperatorStatistics>
-  ): Record<string, OperatorPerformanceMetrics> {
-    const metrics: Record<string, OperatorPerformanceMetrics> = {};
-    for (const operatorId of Object.keys(status)) {
-      metrics[operatorId] = extractPerformanceMetrics(status[operatorId]);
-    }
-    return metrics;
   }
 
   public resetStatus(): void {

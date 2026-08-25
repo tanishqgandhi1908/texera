@@ -31,7 +31,6 @@ import java.nio.charset.Charset
 import javax.websocket.HandshakeResponse
 import javax.websocket.server.{HandshakeRequest, ServerEndpointConfig}
 import scala.jdk.CollectionConverters.{ListHasAsScala, _}
-import scala.util.chaining.scalaUtilChainingOps
 
 /**
   * This configurator extracts user identity from the HTTP handshake request
@@ -67,11 +66,19 @@ class ServletAwareConfigurator extends ServerEndpointConfig.Configurator with La
 
         config.getUserProperties.put(
           classOf[User].getName,
-          new User().tap { user =>
-            user.setUid(userId)
-            user.setName(userName)
-            user.setEmail(userEmail)
-          }
+          new User(
+            userId,
+            userName,
+            userEmail,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null
+          )
         )
         logger.debug(s"User created from headers: ID=$userId, Name=$userName")
       } else {
@@ -90,11 +97,19 @@ class ServletAwareConfigurator extends ServerEndpointConfig.Configurator with La
             val claims = jwtConsumer.process(token).getJwtClaims
             config.getUserProperties.put(
               classOf[User].getName,
-              new User().tap { user =>
-                user.setUid(claims.getClaimValue("userId").asInstanceOf[Long].toInt)
-                user.setName(claims.getSubject)
-                user.setEmail(claims.getClaimValue("email").asInstanceOf[String])
-              }
+              new User(
+                claims.getClaimValue("userId").asInstanceOf[Long].toInt,
+                claims.getSubject,
+                String.valueOf(claims.getClaimValue("email").asInstanceOf[String]),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null
+              )
             )
           })
       }

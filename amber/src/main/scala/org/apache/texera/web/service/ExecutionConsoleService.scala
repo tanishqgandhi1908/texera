@@ -29,7 +29,7 @@ import org.apache.texera.amber.core.storage.{DocumentFactory, VFSURIFactory}
 import org.apache.texera.amber.core.tuple.Tuple
 import org.apache.texera.amber.core.virtualidentity.{ActorVirtualIdentity, OperatorIdentity}
 import org.apache.texera.amber.core.workflow.WorkflowContext
-import org.apache.texera.amber.engine.architecture.coordinator.ExecutionStateUpdate
+import org.apache.texera.amber.engine.architecture.controller.ExecutionStateUpdate
 import org.apache.texera.amber.engine.architecture.rpc.controlcommands.ConsoleMessageType.COMMAND
 import org.apache.texera.amber.engine.architecture.rpc.controlcommands.{
   ConsoleMessage,
@@ -144,12 +144,7 @@ class ExecutionConsoleService(
     consoleMessageOpIdToWriterMap.getOrElseUpdate(
       opId.id, {
         val uri = VFSURIFactory
-          .createConsoleMessagesURI(
-            workflowContext.workflowId,
-            workflowContext.executionId,
-            opId,
-            warehouse = workflowContext.warehouse
-          )
+          .createConsoleMessagesURI(workflowContext.workflowId, workflowContext.executionId, opId)
         val writer = DocumentFactory
           .createDocument(uri, ResultSchema.consoleMessagesSchema)
           .writer("console_messages")
@@ -291,7 +286,7 @@ class ExecutionConsoleService(
   //Receive evaluate python expression
   addSubscription(wsInput.subscribe((req: PythonExpressionEvaluateRequest, uidOpt) => {
     val result = Await.result(
-      client.coordinatorInterface.evaluatePythonExpression(
+      client.controllerInterface.evaluatePythonExpression(
         EvaluatePythonExpressionRequest(req.expression, req.operatorId),
         ()
       ),
@@ -330,7 +325,7 @@ class ExecutionConsoleService(
       addConsoleMessage(consoleStore, req.operatorId, newMessage)
     }
 
-    client.coordinatorInterface.debugCommand(AmberDebugCommandRequest(req.workerId, req.cmd), ())
+    client.controllerInterface.debugCommand(AmberDebugCommandRequest(req.workerId, req.cmd), ())
 
   }))
 

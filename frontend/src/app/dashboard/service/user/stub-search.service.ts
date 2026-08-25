@@ -108,7 +108,7 @@ export class StubSearchService {
           const info = this.mockUserInfo[entry.ownerId];
           if (info) {
             entry.setOwnerName(info.userName);
-            entry.setOwnerAvatar(info.avatar ?? "");
+            entry.setOwnerGoogleAvatar(info.googleAvatar ?? "");
           }
         });
 

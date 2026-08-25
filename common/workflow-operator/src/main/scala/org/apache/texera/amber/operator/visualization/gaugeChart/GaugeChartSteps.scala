@@ -19,21 +19,15 @@
 package org.apache.texera.amber.operator.visualization.gaugeChart
 
 import com.fasterxml.jackson.annotation.JsonProperty
-import com.fasterxml.jackson.databind.annotation.JsonDeserialize
 import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaTitle
+import org.apache.texera.amber.pybuilder.PyStringTypes.EncodableString
 
-/**
-  * Numeric bounds: only used as float(). contentAs names the boxed class — Option
-  * erases its element type, and a blank must not read as 0.
-  */
 class GaugeChartSteps {
   @JsonProperty("start")
   @JsonSchemaTitle("Start")
-  @JsonDeserialize(contentAs = classOf[java.lang.Double])
-  var start: Option[Double] = None
+  var start: EncodableString = ""
 
   @JsonProperty("end")
   @JsonSchemaTitle("End")
-  @JsonDeserialize(contentAs = classOf[java.lang.Double])
-  var end: Option[Double] = None
+  var end: EncodableString = ""
 }

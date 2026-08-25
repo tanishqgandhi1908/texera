@@ -33,7 +33,7 @@
       <div class="footer">
         <span class="footer-text">Edited: {{ entity.lastModifiedTime | date }}</span>
         <texera-user-avatar
-          [avatar]="entity.ownerAvatar"
+          [googleAvatar]="entity.ownerGoogleAvatar"
           userColor="grey"
           [userName]="entity.ownerName || ''"
           nz-button>

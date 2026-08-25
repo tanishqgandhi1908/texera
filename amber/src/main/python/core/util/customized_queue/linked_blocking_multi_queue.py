@@ -154,11 +154,9 @@ class LinkedBlockingMultiQueue(IKeyedQueue):
                 return False
             self.fully_lock()
             try:
-                # head is a sentinel, so the candidate node is always
-                # trail.next and trail is its predecessor.
                 trail = self.head
                 while trail.next is not None:
-                    if trail.next.item == obj:
+                    if trail.item == obj:
                         self.unlink(trail, trail.next)
                         return True
                     trail = trail.next
@@ -171,11 +169,10 @@ class LinkedBlockingMultiQueue(IKeyedQueue):
             trail: LinkedBlockingMultiQueue.Node,
             next_: LinkedBlockingMultiQueue.Node,
         ) -> None:
-            next_.item = None
+            trail.item = None
             trail.next = next_.next
             if self.last == next_:
                 self.last = trail
-            self.count.dec()
             if self.enabled:
                 self.owner.total_count.get_and_dec()
 
@@ -421,7 +418,7 @@ class LinkedBlockingMultiQueue(IKeyedQueue):
                         added = True
                         break
                     elif pg.priority > priority:
-                        new_pg = self.PriorityGroup(priority)
+                        new_pg = LinkedBlockingMultiQueue.PriorityGroup(priority)
                         new_pg.add_queue(sub_queue)
                         self.priority_groups.append(new_pg)
                         added = True
@@ -429,7 +426,7 @@ class LinkedBlockingMultiQueue(IKeyedQueue):
 
                     i += 1
                 if not added:
-                    new_pg = self.PriorityGroup(priority)
+                    new_pg = LinkedBlockingMultiQueue.PriorityGroup(priority)
                     new_pg.add_queue(sub_queue)
                     self.priority_groups.append(new_pg)
 

@@ -68,8 +68,7 @@ export class AdminUserService {
   }
 
   public getCreatedDatasets(uid: number): Observable<ReadonlyArray<DatasetQuota>> {
-    let params = new HttpParams().set("user_id", uid.toString());
-    return this.http.get<ReadonlyArray<DatasetQuota>>(`${USER_CREATED_DATASETS}`, { params: params });
+    return this.http.get<ReadonlyArray<DatasetQuota>>(`${USER_CREATED_DATASETS}`);
   }
 
   public getCreatedWorkflows(uid: number): Observable<ReadonlyArray<Workflow>> {

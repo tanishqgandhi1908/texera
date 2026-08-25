@@ -42,6 +42,7 @@ import { FormsModule } from "@angular/forms";
 import { NzButtonComponent } from "ng-zorro-antd/button";
 import { NzWaveDirective } from "ng-zorro-antd/core/wave";
 import { NzIconDirective } from "ng-zorro-antd/icon";
+import { FormlyRepeatDndComponent } from "../../../../common/formly/repeat-dnd/repeat-dnd.component";
 
 @UntilDestroy()
 @Component({
@@ -67,6 +68,7 @@ import { NzIconDirective } from "ng-zorro-antd/icon";
     NzIconDirective,
     NzListItemActionsComponent,
     NzListItemActionComponent,
+    FormlyRepeatDndComponent,
   ],
 })
 export class NzModalCommentBoxComponent {

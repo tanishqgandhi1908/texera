@@ -32,9 +32,11 @@ class URLFetcherOpExec(descString: String) extends SourceOperatorExecutor {
   override def produceTuple(): Iterator[TupleLike] = {
 
     val urlObj = new URL(desc.url)
-    val contentInputStream = getInputStreamFromURL(urlObj).getOrElse(
-      IOUtils.toInputStream(s"Fetch failed for URL: ${desc.url}", "UTF-8")
-    )
+    val input = getInputStreamFromURL(urlObj)
+    val contentInputStream = input match {
+      case Some(value) => value
+      case None        => IOUtils.toInputStream(s"Fetch failed for URL: $desc.url", "UTF-8")
+    }
     Iterator(if (desc.decodingMethod == DecodingMethod.UTF_8) {
       TupleLike(IOUtils.toString(contentInputStream, "UTF-8"))
     } else {

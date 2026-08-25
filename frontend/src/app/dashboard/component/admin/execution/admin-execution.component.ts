@@ -19,8 +19,6 @@
 
 import { Component, OnDestroy, OnInit } from "@angular/core";
 import { UntilDestroy, untilDestroyed } from "@ngneat/until-destroy";
-import { forkJoin, interval, Observable } from "rxjs";
-import { switchMap } from "rxjs/operators";
 import { AdminExecutionService } from "../../../service/admin/execution/admin-execution.service";
 import { Execution } from "../../../../common/type/execution";
 import {
@@ -49,11 +47,6 @@ import { NzIconDirective } from "ng-zorro-antd/icon";
 import { NzSpinComponent } from "ng-zorro-antd/spin";
 
 export const NO_SORT = "NO_SORTING";
-
-// How often the on-screen elapsed-time / status of already-loaded rows is recomputed (client-side only).
-const TIME_TICK_INTERVAL_MS = 1000;
-// How often the current page's data is refreshed from the server (decoupled from the page bar).
-const EXECUTION_REFRESH_INTERVAL_MS = 5000;
 
 @UntilDestroy()
 @Component({
@@ -91,8 +84,9 @@ export class AdminExecutionComponent implements OnInit, OnDestroy {
   sortDirection: string = NO_SORT;
   filter: string[] = [];
 
-  // Handle for the client-side time/status tick; cleared on destroy.
-  private clockTimer?: ReturnType<typeof setInterval>;
+  // This interval function fetches the latest execution list.
+  // The interval runs every 1 second (1000 milliseconds).
+  timer = setInterval(() => this.ngOnInit(), 1000); // 1 second interval
 
   constructor(
     private adminExecutionService: AdminExecutionService,
@@ -101,81 +95,23 @@ export class AdminExecutionComponent implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit() {
-    // Initial load of the current page.
-    this.fetchData();
+    this.adminExecutionService
+      .getExecutionList(this.pageSize, this.currentPageIndex, this.sortField, this.sortDirection, this.filter)
+      .pipe(untilDestroyed(this))
+      .subscribe(executionList => {
+        this.listOfExecutions = [...executionList];
+        this.updateTimeStatus();
+        this.isLoading = false;
+      });
 
-    // Tick the elapsed-time / "JUST COMPLETED" status of already-loaded rows every
-    // second. This is purely client-side (no server call) and never touches the page bar.
-    this.clockTimer = setInterval(() => this.updateTimeStatus(), TIME_TICK_INTERVAL_MS);
-
-    // Periodically refresh the current page's data so live status changes and new
-    // executions stay fresh. switchMap cancels a stale in-flight request, and the page
-    // index/size are not disturbed here, so the page bar stays stable while polling.
-    interval(EXECUTION_REFRESH_INTERVAL_MS)
-      .pipe(
-        switchMap(() => this.currentPage$()),
-        untilDestroyed(this)
-      )
-      .subscribe(result => this.applyCurrentPage(result));
+    this.adminExecutionService
+      .getTotalWorkflows()
+      .pipe(untilDestroyed(this))
+      .subscribe(total => (this.totalWorkflows = total));
   }
 
   ngOnDestroy(): void {
-    if (this.clockTimer !== undefined) {
-      clearInterval(this.clockTimer);
-    }
-  }
-
-  /**
-   * Fetch the current page of executions plus the total count, used on init and on
-   * user-driven pagination / sort / filter changes (a brief loading state is fine here).
-   */
-  fetchData(): void {
-    this.isLoading = true;
-    this.currentPage$()
-      .pipe(untilDestroyed(this))
-      .subscribe(result => {
-        this.applyCurrentPage(result);
-        this.isLoading = false;
-      });
-  }
-
-  /**
-   * Refresh only the current page's rows without changing the page index/size — used by
-   * the background poll and immediately after kill/pause/resume so the control surface
-   * reflects the new status without waiting for the next refresh tick.
-   */
-  private fetchCurrentPage(): void {
-    this.currentPage$()
-      .pipe(untilDestroyed(this))
-      .subscribe(result => this.applyCurrentPage(result));
-  }
-
-  /**
-   * Build the request for the current page's executions and the total workflow count.
-   */
-  private currentPage$(): Observable<{ executions: ReadonlyArray<Execution>; total: number }> {
-    return forkJoin({
-      executions: this.adminExecutionService.getExecutionList(
-        this.pageSize,
-        this.currentPageIndex,
-        this.sortField,
-        this.sortDirection,
-        this.filter
-      ),
-      total: this.adminExecutionService.getTotalWorkflows(),
-    });
-  }
-
-  /**
-   * Apply a fetched page to the view. The total is only reassigned when it actually
-   * changed, so a background refresh never churns the page count mid-interaction.
-   */
-  private applyCurrentPage(result: { executions: ReadonlyArray<Execution>; total: number }): void {
-    this.listOfExecutions = [...result.executions];
-    if (result.total !== this.totalWorkflows) {
-      this.totalWorkflows = result.total;
-    }
-    this.updateTimeStatus();
+    clearInterval(this.timer);
   }
 
   maxStringLength(input: string, length: number): string {
@@ -326,8 +262,6 @@ export class AdminExecutionComponent implements OnInit, OnDestroy {
     let socket = new WorkflowWebsocketService(this.config);
     socket.openWebsocket(wid);
     socket.send("WorkflowKillRequest", {});
-    // Reflect the new status promptly instead of waiting for the next refresh tick.
-    this.fetchCurrentPage();
     // socket.closeWebsocket();
   }
 
@@ -339,8 +273,6 @@ export class AdminExecutionComponent implements OnInit, OnDestroy {
     let socket = new WorkflowWebsocketService(this.config);
     socket.openWebsocket(wid);
     socket.send("WorkflowPauseRequest", {});
-    // Reflect the new status promptly instead of waiting for the next refresh tick.
-    this.fetchCurrentPage();
     // socket.closeWebsocket();
   }
 
@@ -352,8 +284,6 @@ export class AdminExecutionComponent implements OnInit, OnDestroy {
     let socket = new WorkflowWebsocketService(this.config);
     socket.openWebsocket(wid);
     socket.send("WorkflowResumeRequest", {});
-    // Reflect the new status promptly instead of waiting for the next refresh tick.
-    this.fetchCurrentPage();
     // socket.closeWebsocket();
   }
 
@@ -367,11 +297,11 @@ export class AdminExecutionComponent implements OnInit, OnDestroy {
     if (sortField == this.sortField && sortOrder == null) {
       this.sortField = NO_SORT;
       this.sortDirection = NO_SORT;
-      this.fetchData();
+      this.ngOnInit();
     } else if (sortOrder != null) {
       this.sortField = sortField;
       this.sortDirection = sortOrder === "descend" ? "desc" : "asc";
-      this.fetchData();
+      this.ngOnInit();
     }
   }
 
@@ -380,20 +310,18 @@ export class AdminExecutionComponent implements OnInit, OnDestroy {
    * @param params
    */
   onQueryParamsChange(params: NzTableQueryParams): void {
-    const { pageSize, pageIndex } = params;
-    const pageSizeChanged = pageSize !== this.pageSize;
-    const pageIndexChanged = pageIndex - 1 !== this.currentPageIndex;
-    // Sort/filter changes also emit nzQueryParams, but they are handled by
-    // onSortChange/onFilterChange; ignore them here to avoid a double fetch.
-    if (!pageSizeChanged && !pageIndexChanged) {
-      return;
+    const { pageSize, pageIndex, sort, filter } = params;
+    if (pageSize != this.pageSize) {
+      this.pageSize = pageSize;
+      // If the user is at the last page, and increment the pageSize, move user to new last page index if necessary.
+      if (Math.ceil(this.totalWorkflows / pageSize) < this.currentPageIndex + 1) {
+        this.currentPageIndex = Math.ceil(this.totalWorkflows / pageSize) - 1;
+      }
+      this.ngOnInit();
+    } else if (pageIndex - 1 != this.currentPageIndex) {
+      this.currentPageIndex = pageIndex - 1;
+      this.ngOnInit();
     }
-    this.pageSize = pageSize;
-    // Read both the size and the (1-indexed) page from the event and clamp the page
-    // into range, independent of the order ng-zorro reports size vs. index changes.
-    const lastPageIndex = Math.max(1, Math.ceil(this.totalWorkflows / pageSize));
-    this.currentPageIndex = Math.min(pageIndex, lastPageIndex) - 1;
-    this.fetchData();
   }
 
   /**
@@ -403,6 +331,6 @@ export class AdminExecutionComponent implements OnInit, OnDestroy {
    */
   onFilterChange(filter: any[]): void {
     this.filter = filter.map(item => String(item));
-    this.fetchData();
+    this.ngOnInit();
   }
 }

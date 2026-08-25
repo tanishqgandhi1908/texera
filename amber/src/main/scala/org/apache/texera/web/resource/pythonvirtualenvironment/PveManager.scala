@@ -100,16 +100,6 @@ object PveManager extends LazyLogging {
       "PIP_NO_INPUT" -> "1"
     )
 
-  // Test seam: every child process (venv creation, pip install/uninstall/freeze)
-  // funnels through this so unit tests can run hermetically — no real venv, no
-  // pip, no network. Production wiring runs the command for real; PveResourceSpec
-  // swaps in a fake that fabricates the venv layout and emits canned output.
-  private[pythonvirtualenvironment] type ProcessRunner =
-    (Seq[String], Seq[(String, String)], ProcessLogger) => Int
-
-  private[pythonvirtualenvironment] var runProcess: ProcessRunner =
-    (command, env, logger) => Process(command, None, env: _*).!(logger)
-
   private def readPackageFile(path: Path): Seq[String] = {
     if (Files.exists(path)) {
       Files
@@ -141,17 +131,13 @@ object PveManager extends LazyLogging {
     try {
       val python = venvPython(tempVenv).toString
       val createCode =
-        runProcess(
-          Seq(PythonUtils.getPythonExecutable, "-m", "venv", tempVenv.toString),
-          Nil,
-          ProcessLogger(_ => (), _ => ())
-        )
+        Process(Seq(PythonUtils.getPythonExecutable, "-m", "venv", tempVenv.toString)).!
       if (createCode != 0) {
         logger.error(s"failed to create temp venv for system-package resolution (exit=$createCode)")
         return Seq.empty
       }
 
-      val installCode = runProcess(
+      val installCode = Process(
         Seq(
           python,
           "-u",
@@ -164,18 +150,16 @@ object PveManager extends LazyLogging {
           "-r",
           requirementsPath.toString
         ),
-        pipEnv.toSeq,
-        ProcessLogger(_ => (), _ => ())
-      )
+        None,
+        pipEnv.toSeq: _*
+      ).!
       if (installCode != 0) {
         logger.error(s"failed to install requirements into temp venv (exit=$installCode)")
         return Seq.empty
       }
 
       val collected = scala.collection.mutable.ListBuffer[String]()
-      val freezeCode = runProcess(
-        Seq(python, "-m", "pip", "freeze"),
-        Nil,
+      val freezeCode = Process(Seq(python, "-m", "pip", "freeze")).!(
         ProcessLogger(line => collected += line, _ => ())
       )
       if (freezeCode != 0) {
@@ -223,7 +207,7 @@ object PveManager extends LazyLogging {
       args: Seq[String],
       queue: BlockingQueue[String]
   ): Int = {
-    runProcess(
+    Process(
       Seq(
         python,
         "-u",
@@ -234,7 +218,9 @@ object PveManager extends LazyLogging {
         "off",
         "--no-input"
       ) ++ args,
-      pipEnv.toSeq,
+      None,
+      pipEnv.toSeq: _*
+    ).!(
       ProcessLogger(
         out => queue.put(s"[pip] $out"),
         err => queue.put(s"[pip][ERR] $err")
@@ -273,9 +259,7 @@ object PveManager extends LazyLogging {
 
     Files.createDirectories(venvDirPath.getParent)
 
-    val createCode = runProcess(
-      Seq(createVenvPython, "-m", "venv", venvDirPath.toString),
-      Nil,
+    val createCode = Process(Seq(createVenvPython, "-m", "venv", venvDirPath.toString)).!(
       ProcessLogger(
         out => queue.put(s"[pve] $out"),
         err => queue.put(s"[pve][ERR] $err")
@@ -537,9 +521,7 @@ object PveManager extends LazyLogging {
     }
 
     try {
-      val output = scala.collection.mutable.ListBuffer[String]()
-
-      val exitCode = runProcess(
+      val command = Process(
         Seq(
           python,
           "-u",
@@ -549,7 +531,13 @@ object PveManager extends LazyLogging {
           "-y",
           trimmedPackageName
         ),
-        pipEnv.toSeq,
+        None,
+        pipEnv.toSeq: _*
+      )
+
+      val output = scala.collection.mutable.ListBuffer[String]()
+
+      val exitCode = command.!(
         ProcessLogger(
           out => {
             logger.info(s"[pip] $out")

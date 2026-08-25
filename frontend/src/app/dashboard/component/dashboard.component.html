@@ -204,26 +204,12 @@
         *ngIf="sidebarTabs.about_enabled"
         nz-menu-item
         nz-tooltip
-        nzMatchRouter="true"
         nzTooltipPlacement="right"
         [routerLink]="ABOUT">
         <span
           nz-icon
           nzType="info-circle"></span>
         <span>About</span>
-      </li>
-
-      <li
-        *ngIf="isLogin"
-        nz-menu-item
-        nz-tooltip
-        nzMatchRouter="true"
-        nzTooltipPlacement="right"
-        [routerLink]="USER_FEEDBACK">
-        <span
-          nz-icon
-          nzType="message"></span>
-        <span>Feedback</span>
       </li>
     </ul>
     <span id="build-number">Build: {{ buildNumber }}</span>
@@ -249,15 +235,11 @@
         <ng-container *ngIf="isLogin">
           <texera-user-icon></texera-user-icon>
         </ng-container>
-        <a
-          *ngIf="!isLogin"
-          nz-button
-          nzType="primary"
-          nzSize="large"
-          class="nav-login-link"
-          [routerLink]="LOGIN">
-          Sign in
-        </a>
+        <asl-google-signin-button
+          *ngIf="!isLogin && this.config.env.googleLogin"
+          type="standard"
+          size="large"
+          [width]="200"></asl-google-signin-button>
       </div>
 
       <nz-content>

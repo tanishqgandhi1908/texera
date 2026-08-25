@@ -31,7 +31,6 @@ import javax.annotation.{Nullable, Priority}
 import javax.ws.rs.Priorities
 import javax.ws.rs.container.{ContainerRequestContext, PreMatching}
 import javax.ws.rs.core.SecurityContext
-import scala.util.chaining.scalaUtilChainingOps
 
 @PreMatching
 @Priority(Priorities.AUTHENTICATION) object GuestAuthFilter {
@@ -39,10 +38,8 @@ import scala.util.chaining.scalaUtilChainingOps
     override protected def newInstance = new GuestAuthFilter
   }
 
-  val GUEST: User = new User().tap { user =>
-    user.setName("guest")
-    user.setRole(UserRoleEnum.REGULAR)
-  }
+  val GUEST: User =
+    new User(null, "guest", null, null, null, null, UserRoleEnum.REGULAR, null, null, null, null)
 }
 
 @PreMatching

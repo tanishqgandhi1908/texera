@@ -41,8 +41,6 @@ export class MockComputingUnitStatusService {
 
   selectComputingUnit(): void {}
 
-  refreshComputingUnitList(): void {}
-
   startPolling(): void {}
 
   stopPolling(): void {}

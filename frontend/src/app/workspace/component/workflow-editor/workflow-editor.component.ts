@@ -25,7 +25,7 @@ import { DragDropService } from "../../service/drag-drop/drag-drop.service";
 import { DynamicSchemaService } from "../../service/dynamic-schema/dynamic-schema.service";
 import { ExecuteWorkflowService } from "../../service/execute-workflow/execute-workflow.service";
 import { fromJointPaperEvent, JointUIService, linkPathStrokeColor } from "../../service/joint-ui/joint-ui.service";
-import { Validation, ValidationWorkflowService } from "../../service/validation/validation-workflow.service";
+import { ValidationWorkflowService } from "../../service/validation/validation-workflow.service";
 import { WorkflowActionService } from "../../service/workflow-graph/model/workflow-action.service";
 import { WorkflowStatusService } from "../../service/workflow-status/workflow-status.service";
 import { ExecutionState, OperatorState } from "../../types/execute-workflow.interface";
@@ -48,7 +48,6 @@ import { NzNoAnimationDirective } from "ng-zorro-antd/core/animation";
 import { ContextMenuComponent } from "./context-menu/context-menu/context-menu.component";
 import { NgIf } from "@angular/common";
 import { AgentInteractionComponent } from "../agent/agent-interaction/agent-interaction.component";
-import { JupyterPanelService } from "../../service/jupyter-panel/jupyter-panel.service";
 
 // jointjs interactive options for enabling and disabling interactivity
 // https://resources.jointjs.com/docs/jointjs/v3.2/joint.html#dia.Paper.prototype.options.interactive
@@ -129,8 +128,7 @@ export class WorkflowEditorComponent implements OnInit, AfterViewInit, OnDestroy
     public nzContextMenu: NzContextMenuService,
     private elementRef: ElementRef,
     private config: GuiConfigService,
-    private agentService: AgentService,
-    private jupyterPanelService: JupyterPanelService
+    private agentService: AgentService
   ) {
     this.wrapper = this.workflowActionService.getJointGraphWrapper();
   }
@@ -384,10 +382,7 @@ export class WorkflowEditorComponent implements OnInit, AfterViewInit, OnDestroy
             this.isSink(operator.operatorID)
           );
         }
-        this.applyOperatorBorder(
-          operator.operatorID,
-          this.validationWorkflowService.validateOperator(operator.operatorID)
-        );
+        this.applyOperatorBorder(operator.operatorID);
       });
   }
 
@@ -402,14 +397,9 @@ export class WorkflowEditorComponent implements OnInit, AfterViewInit, OnDestroy
    * Centralizing this here avoids the race where the validation pass
    * overwrites a state-derived stroke (or vice versa) for an operator that
    * is both invalid and has a cached execution status.
-   *
-   * Both callers obtain the Validation themselves and pass it in: the
-   * validation-stream subscriber forwards the result the stream just emitted,
-   * and the operator-add subscriber computes it via validateOperator. Keeping
-   * the parameter required means the color decision never silently depends on
-   * a recompute hidden inside this helper.
    */
-  private applyOperatorBorder(operatorID: string, validation: Validation): void {
+  private applyOperatorBorder(operatorID: string): void {
+    const validation = this.validationWorkflowService.validateOperator(operatorID);
     if (!validation.isValid) {
       this.jointUIService.changeOperatorColor(this.paper, operatorID, false);
       return;
@@ -681,9 +671,6 @@ export class WorkflowEditorComponent implements OnInit, AfterViewInit, OnDestroy
         const elementID = event[0].model.id.toString();
         const highlightedOperatorIDs = this.wrapper.getCurrentHighlightedOperatorIDs();
         const highlightedCommentBoxIDs = this.wrapper.getCurrentHighlightedCommentBoxIDs();
-        if (this.workflowActionService.getTexeraGraph().hasOperator(elementID)) {
-          this.jupyterPanelService.onWorkflowComponentClick(elementID); // highlight corresponding Jupyter notebook cell
-        }
         if (event[1].shiftKey) {
           // if in multiselect toggle highlights on click
           if (highlightedOperatorIDs.includes(elementID)) {
@@ -1038,7 +1025,7 @@ export class WorkflowEditorComponent implements OnInit, AfterViewInit, OnDestroy
     this.validationWorkflowService
       .getOperatorValidationStream()
       .pipe(untilDestroyed(this))
-      .subscribe(value => this.applyOperatorBorder(value.operatorID, value.validation));
+      .subscribe(value => this.applyOperatorBorder(value.operatorID));
   }
 
   /**
@@ -1625,12 +1612,6 @@ export class WorkflowEditorComponent implements OnInit, AfterViewInit, OnDestroy
               displayName,
               position,
             };
-            // Results are pulled on demand (not pushed over the socket); refresh
-            // the active agent's summaries so the popover shows current data.
-            const activeAgentId = this.agentService.getActivelyConnectedAgentIds()[0];
-            if (activeAgentId) {
-              this.agentService.fetchOperatorResults(activeAgentId);
-            }
           }
         }
         this.changeDetectorRef.detectChanges();

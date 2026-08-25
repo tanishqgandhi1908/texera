@@ -51,6 +51,7 @@ class ComputingUnitAccessSpec
     val u = new User
     u.setUid(uid)
     u.setName(name)
+    u.setPassword("password")
     u
   }
 
@@ -80,7 +81,7 @@ class ComputingUnitAccessSpec
     }
   }
 
-  override def afterAll(): Unit = closeConnectionPool()
+  override def afterAll(): Unit = shutdownDB()
 
   "getComputingUnitAccess" should "return NONE when the computing unit does not exist" in {
     ComputingUnitAccess.getComputingUnitAccess(999, 1) shouldBe PrivilegeEnum.NONE

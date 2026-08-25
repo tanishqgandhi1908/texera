@@ -48,13 +48,11 @@ should_merge() {
 
 cd "$(dirname "$0")"
 
-# Detect all Dockerfiles in bin/dockerfiles/ and extract service names.
-# `[[ ! -e ... ]]` guards the bash-default-glob case where a no-match glob
-# stays as the literal pattern instead of becoming an empty array.
-dockerfiles=( dockerfiles/*.dockerfile )
+# Detect all Dockerfiles and extract service names
+dockerfiles=( *.dockerfile )
 
-if [[ ${#dockerfiles[@]} -eq 0 ]] || [[ ! -e "${dockerfiles[0]}" ]]; then
-  echo "❌ No Dockerfiles found (*.dockerfile) in bin/dockerfiles/."
+if [[ ${#dockerfiles[@]} -eq 0 ]]; then
+  echo "❌ No Dockerfiles found in the current directory."
   exit 1
 fi
 

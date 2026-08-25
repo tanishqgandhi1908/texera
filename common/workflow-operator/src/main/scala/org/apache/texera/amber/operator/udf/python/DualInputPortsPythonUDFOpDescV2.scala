@@ -29,15 +29,11 @@ import org.apache.texera.amber.core.workflow._
 import org.apache.texera.amber.operator.LogicalOp
 import org.apache.texera.amber.operator.metadata.{OperatorGroupConstants, OperatorInfo}
 
-class DualInputPortsPythonUDFOpDescV2 extends LogicalOp with PythonUdfUiParameterSupport {
+class DualInputPortsPythonUDFOpDescV2 extends LogicalOp {
   @JsonProperty(
     required = true,
     defaultValue =
       "# Choose from the following templates:\n" +
-        "# \n" +
-        "# Define UiParameter inside open() of ProcessTupleOperator, ProcessBatchOperator, or ProcessTableOperator.\n" +
-        "# Example: self.count = self.UiParameter(\"count\", AttributeType.INT).value\n" +
-        "# See the Python UDF operator documentation for supported types and behavior.\n" +
         "# \n" +
         "# from pytexera import *\n" +
         "# \n" +
@@ -109,7 +105,6 @@ class DualInputPortsPythonUDFOpDescV2 extends LogicalOp with PythonUdfUiParamete
           )
         trimmed
       }
-    val codeWithParameters = injectUiParameters(code)
 
     val physicalOp = if (workers > 1) {
       PhysicalOp
@@ -117,7 +112,7 @@ class DualInputPortsPythonUDFOpDescV2 extends LogicalOp with PythonUdfUiParamete
           workflowId,
           executionId,
           operatorIdentifier,
-          OpExecWithCode(codeWithParameters, "python")
+          OpExecWithCode(code, "python")
         )
         .withParallelizable(true)
         .withSuggestedWorkerNum(workers)
@@ -127,7 +122,7 @@ class DualInputPortsPythonUDFOpDescV2 extends LogicalOp with PythonUdfUiParamete
           workflowId,
           executionId,
           operatorIdentifier,
-          OpExecWithCode(codeWithParameters, "python")
+          OpExecWithCode(code, "python")
         )
         .withParallelizable(false)
     }

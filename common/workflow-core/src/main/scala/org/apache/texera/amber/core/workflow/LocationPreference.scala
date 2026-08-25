@@ -22,9 +22,9 @@ package org.apache.texera.amber.core.workflow
 // LocationPreference defines where operators should run.
 sealed trait LocationPreference extends Serializable
 
-// PreferCoordinator: Run on the coordinator node.
+// PreferController: Run on the controller node.
 // Example: For scan operators reading files.
-object PreferCoordinator extends LocationPreference
+object PreferController extends LocationPreference
 
 // RoundRobinPreference: Distribute across worker nodes, per operator.
 // Example:

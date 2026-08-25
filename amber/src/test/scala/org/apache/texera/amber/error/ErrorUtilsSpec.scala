@@ -199,9 +199,9 @@ class ErrorUtilsSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "fall back to the dummy operator id for actor names that do not match the pattern" in {
-    val actor = ActorVirtualIdentity("COORDINATOR")
+    val actor = ActorVirtualIdentity("CONTROLLER")
     val (operatorId, workerId) = ErrorUtils.getOperatorFromActorIdOpt(Some(actor))
     operatorId shouldBe "__DummyOperator"
-    workerId shouldBe "COORDINATOR"
+    workerId shouldBe "CONTROLLER"
   }
 }

@@ -38,42 +38,27 @@ class JwtParserSpec extends AnyFlatSpec with Matchers {
     val claims = new JwtClaims
     claims.setSubject("alice")
     claims.setClaim("userId", 42)
+    claims.setClaim("googleId", "g-123")
     claims.setClaim("email", "alice@example.com")
     claims.setClaim("role", UserRoleEnum.ADMIN.name)
-    claims.setClaim("avatar", "avatar-blob")
+    claims.setClaim("googleAvatar", "avatar-blob")
     claims.setExpirationTimeMinutesInTheFuture(10f)
     claims
   }
 
-  "JwtParser.claimsToSessionUser" should "populate every issued claim including avatar" in {
+  "JwtParser.claimsToSessionUser" should "populate every issued claim including googleAvatar" in {
     val user: User = JwtParser.claimsToSessionUser(buildClaims()).getUser
     user.getUid shouldBe 42
     user.getName shouldBe "alice"
     user.getEmail shouldBe "alice@example.com"
-    user.getAvatar shouldBe "avatar-blob"
+    user.getGoogleId shouldBe "g-123"
+    user.getGoogleAvatar shouldBe "avatar-blob"
     user.getRole shouldBe UserRoleEnum.ADMIN
   }
 
-  // The claim was `googleAvatar` before the avatar stopped being Google-specific. Tokens minted
-  // before the rename stay valid for a week, so a session built from one must still carry its
-  // avatar rather than silently losing it.
-  it should "still read the avatar from a pre-rename googleAvatar claim" in {
-    val claims = buildClaims()
-    claims.unsetClaim("avatar")
-    claims.setClaim("googleAvatar", "legacy-blob")
-
-    JwtParser.claimsToSessionUser(claims).getUser.getAvatar shouldBe "legacy-blob"
-  }
-
-  it should "prefer the avatar claim when a token carries both names" in {
-    val claims = buildClaims()
-    claims.setClaim("googleAvatar", "legacy-blob")
-
-    JwtParser.claimsToSessionUser(claims).getUser.getAvatar shouldBe "avatar-blob"
-  }
-
-  it should "leave non-issued slots null (comment, accountCreation, affiliation, joiningReason)" in {
+  it should "leave non-issued slots null (password, comment, accountCreation, affiliation, joiningReason)" in {
     val user: User = JwtParser.claimsToSessionUser(buildClaims()).getUser
+    user.getPassword shouldBe null
     user.getComment shouldBe null
     user.getAccountCreationTime shouldBe null
     user.getAffiliation shouldBe null
@@ -86,7 +71,7 @@ class JwtParserSpec extends AnyFlatSpec with Matchers {
     parsed.isPresent shouldBe true
     val u = parsed.get().getUser
     u.getUid shouldBe 42
-    u.getAvatar shouldBe "avatar-blob"
+    u.getGoogleAvatar shouldBe "avatar-blob"
   }
 
   "JwtParser.parseToken" should "return empty on a structurally invalid token" in {
@@ -174,9 +159,10 @@ class JwtParserSpec extends AnyFlatSpec with Matchers {
     val bob = new JwtClaims
     bob.setSubject("bob")
     bob.setClaim("userId", 7)
+    bob.setClaim("googleId", "g-bob")
     bob.setClaim("email", "bob@example.com")
     bob.setClaim("role", UserRoleEnum.REGULAR.name)
-    bob.setClaim("avatar", "bob-avatar")
+    bob.setClaim("googleAvatar", "bob-avatar")
     bob.setExpirationTimeMinutesInTheFuture(10f)
 
     val aliceUser = JwtParser.parseToken(JwtAuth.jwtToken(alice)).get().getUser
@@ -197,7 +183,7 @@ class JwtParserSpec extends AnyFlatSpec with Matchers {
     first.getUid shouldBe second.getUid
     first.getName shouldBe second.getName
     first.getEmail shouldBe second.getEmail
-    first.getAvatar shouldBe second.getAvatar
+    first.getGoogleAvatar shouldBe second.getGoogleAvatar
     first.getRole shouldBe second.getRole
   }
 

@@ -30,6 +30,7 @@ import { ExecutionMode } from "../type/workflow";
 export class MockGuiConfigService {
   private _config: GuiConfig = {
     exportExecutionResultEnabled: false,
+    autoAttributeCorrectionEnabled: false,
     selectingFilesFromDatasetsEnabled: false,
     localLogin: true,
     googleLogin: true,
@@ -47,13 +48,12 @@ export class MockGuiConfigService {
     sharingComputingUnitEnabled: false,
     operatorConsoleMessageBufferSize: 1000,
     defaultLocalUser: { username: "", password: "" },
+    expirationTimeInMinutes: 2880,
     activeTimeInMinutes: 15,
     copilotEnabled: false,
     limitColumns: 15,
     attributionEnabled: false,
     pythonNotebookMigrationEnabled: false,
-    pythonNotebookMigrationTimeoutMinutes: 10,
-    deploymentVersionCheckEnabled: false,
   };
 
   get env(): GuiConfig {

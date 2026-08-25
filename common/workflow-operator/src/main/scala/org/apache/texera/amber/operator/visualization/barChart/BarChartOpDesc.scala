@@ -109,9 +109,7 @@ class BarChartOpDesc extends PythonOperatorDescriptor {
       isPatternSelected = "True"
 
     var isCategoryColumn = "False"
-    // "" is the Scala default ("No Selection" is only JSON metadata); an empty
-    // column must also count as "no category", else px.bar(color="") fails.
-    if (categoryColumn.nonEmpty && categoryColumn != "No Selection")
+    if (categoryColumn != "No Selection")
       isCategoryColumn = "True"
 
     val finalCode =

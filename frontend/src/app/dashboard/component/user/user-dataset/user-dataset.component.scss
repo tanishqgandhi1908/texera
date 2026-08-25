@@ -17,9 +17,9 @@
  * under the License.
  */
 
-@use "../../dashboard.component" as *;
-@use "../../section-style" as *;
-@use "../../button-style" as *;
+@import "../../dashboard.component";
+@import "../../section-style";
+@import "../../button-style";
 
 .dataset-menu-bar {
   height: 55px;

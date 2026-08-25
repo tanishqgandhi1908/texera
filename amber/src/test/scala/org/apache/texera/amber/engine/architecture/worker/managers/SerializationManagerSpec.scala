@@ -50,19 +50,18 @@ class SerializationManagerSpec extends AnyFlatSpec {
   // A non-worker actor id (created via the plain string constructor, not the
   // worker-identity factory) — VirtualIdentityUtils.getWorkerIndex will
   // return None for this, triggering the IllegalStateException guard.
-  private val coordinatorActorId: ActorVirtualIdentity = ActorVirtualIdentity("coordinator")
+  private val controllerActorId: ActorVirtualIdentity = ActorVirtualIdentity("controller")
 
   private def mkRequest(info: OpExecInitInfo, totalWorkers: Int = 1): InitializeExecutorRequest =
     InitializeExecutorRequest(
       totalWorkerCount = totalWorkers,
       opExecInitInfo = info,
-      isSource = false,
-      loopStartPortUris = Map.empty
+      isSource = false
     )
 
   "SerializationManager.restoreExecutorState" should
     "throw IllegalStateException when actorId is not a worker identity" in {
-    val mgr = new SerializationManager(coordinatorActorId)
+    val mgr = new SerializationManager(controllerActorId)
     mgr.setOpInitialization(
       mkRequest(
         OpExecWithClassName(

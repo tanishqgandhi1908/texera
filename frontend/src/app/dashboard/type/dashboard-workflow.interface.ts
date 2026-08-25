@@ -26,5 +26,4 @@ export interface DashboardWorkflow {
   projectIDs: number[];
   accessLevel: string;
   ownerId: number;
-  coverImage: string | null;
 }

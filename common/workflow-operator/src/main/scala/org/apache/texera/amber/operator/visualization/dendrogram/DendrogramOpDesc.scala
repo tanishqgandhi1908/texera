@@ -20,11 +20,10 @@
 package org.apache.texera.amber.operator.visualization.dendrogram
 
 import com.fasterxml.jackson.annotation.{JsonProperty, JsonPropertyDescription}
-import com.fasterxml.jackson.databind.annotation.JsonDeserialize
-import com.kjetland.jackson.jsonSchema.annotations.{JsonSchemaInject, JsonSchemaTitle}
+import com.kjetland.jackson.jsonSchema.annotations.JsonSchemaTitle
 import org.apache.texera.amber.core.tuple.{AttributeType, Schema}
 import org.apache.texera.amber.pybuilder.PythonTemplateBuilder.PythonTemplateBuilderStringContext
-import org.apache.texera.amber.pybuilder.PyStringTypes.{EncodableString, PythonLiteral}
+import org.apache.texera.amber.pybuilder.PyStringTypes.EncodableString
 import org.apache.texera.amber.core.workflow.PortIdentity
 import org.apache.texera.amber.operator.PythonOperatorDescriptor
 import org.apache.texera.amber.operator.metadata.annotations.AutofillAttributeName
@@ -33,16 +32,6 @@ import org.apache.texera.amber.pybuilder.PythonTemplateBuilder
 
 import javax.validation.constraints.NotNull
 
-// type constraint: xVal / yVal are stacked into a numeric point matrix for
-// hierarchical clustering, so they can only be numeric columns.
-@JsonSchemaInject(json = """
-{
-  "attributeTypeRules": {
-    "xVal": { "enum": ["integer", "long", "double"] },
-    "yVal": { "enum": ["integer", "long", "double"] }
-  }
-}
-""")
 class DendrogramOpDesc extends PythonOperatorDescriptor {
   @JsonProperty(value = "xVal", required = true)
   @JsonSchemaTitle("Value X Column")
@@ -65,13 +54,10 @@ class DendrogramOpDesc extends PythonOperatorDescriptor {
   @NotNull(message = "Labels cannot be empty")
   var labels: EncodableString = ""
 
-  // Numeric: scipy compares it against the linkage distances. contentAs names the
-  // boxed class — Option erases its element type, and a blank must not read as 0.
   @JsonProperty(defaultValue = "", required = false)
   @JsonSchemaTitle("Color Threshold")
   @JsonPropertyDescription("Value at which separation of clusters will be made")
-  @JsonDeserialize(contentAs = classOf[java.lang.Double])
-  var threshold: Option[Double] = None
+  var threshold: EncodableString = ""
 
   override def getOutputSchemas(
       inputSchemas: Map[PortIdentity, Schema]
@@ -92,15 +78,17 @@ class DendrogramOpDesc extends PythonOperatorDescriptor {
     assert(xVal.nonEmpty, "Value X Column cannot be empty")
     assert(yVal.nonEmpty, "Value Y Column cannot be empty")
     assert(labels.nonEmpty, "Labels cannot be empty")
-    // Unset means None, which is scipy's own 0.7 * max distance.
-    val thresholdExpr: PythonLiteral = threshold.map(_.toString).getOrElse("None")
+    val strippedThreshold: EncodableString = threshold.trim
+    val isThreshold =
+      if (strippedThreshold.nonEmpty) pyb"color_threshold=$strippedThreshold"
+      else "color_threshold=None"
     pyb"""
        |        x = np.array(table[$xVal])
        |        y = np.array(table[$yVal])
        |        data = np.column_stack((x, y))
        |        labels = table[$labels].tolist()
        |
-       |        fig = ff.create_dendrogram(data, labels=labels, color_threshold=$thresholdExpr)
+       |        fig = ff.create_dendrogram(data, labels=labels, $isThreshold)
        |        fig.update_layout(yaxis_title="Linkage Distance", margin=dict(l=0, r=0, b=0, t=0))
        |"""
   }

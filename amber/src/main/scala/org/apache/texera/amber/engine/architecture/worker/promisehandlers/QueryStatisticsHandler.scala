@@ -35,8 +35,7 @@ trait QueryStatisticsHandler {
       request: EmptyRequest,
       ctx: AsyncRPCContext
   ): Future[WorkerMetricsResponse] = {
-    val (state, stateVersion) = dp.stateManager.getStateWithVersion
-    WorkerMetricsResponse(WorkerMetrics(state, dp.collectStatistics(), stateVersion))
+    WorkerMetricsResponse(WorkerMetrics(dp.stateManager.getCurrentState, dp.collectStatistics()))
   }
 
 }

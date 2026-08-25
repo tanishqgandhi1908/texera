@@ -138,7 +138,6 @@ export const testWorkflowFileNameConflictEntries: DashboardEntry[] = [
     accessLevel: "Write",
     projectIDs: [1],
     ownerId: 1,
-    coverImage: null,
   }),
   new DashboardEntry({
     workflow: testDownloadWorkflow2,
@@ -147,7 +146,6 @@ export const testWorkflowFileNameConflictEntries: DashboardEntry[] = [
     accessLevel: "Write",
     projectIDs: [1, 2],
     ownerId: 1,
-    coverImage: null,
   }),
   new DashboardEntry({
     workflow: testDownloadWorkflow3,
@@ -156,7 +154,6 @@ export const testWorkflowFileNameConflictEntries: DashboardEntry[] = [
     accessLevel: "Write",
     projectIDs: [1],
     ownerId: 2,
-    coverImage: null,
   }),
 ];
 
@@ -168,7 +165,6 @@ export const testWorkflowEntries: DashboardEntry[] = [
     accessLevel: "Write",
     projectIDs: [1],
     ownerId: 1,
-    coverImage: null,
   }),
   new DashboardEntry({
     workflow: testWorkflow2,
@@ -177,7 +173,6 @@ export const testWorkflowEntries: DashboardEntry[] = [
     accessLevel: "Write",
     projectIDs: [1, 2],
     ownerId: 1,
-    coverImage: null,
   }),
   new DashboardEntry({
     workflow: testWorkflow3,
@@ -186,7 +181,6 @@ export const testWorkflowEntries: DashboardEntry[] = [
     accessLevel: "Write",
     projectIDs: [1],
     ownerId: 2,
-    coverImage: null,
   }),
   new DashboardEntry({
     workflow: testWorkflow4,
@@ -195,7 +189,6 @@ export const testWorkflowEntries: DashboardEntry[] = [
     accessLevel: "Write",
     projectIDs: [3],
     ownerId: 2,
-    coverImage: null,
   }),
   new DashboardEntry({
     workflow: testWorkflow5,
@@ -204,7 +197,6 @@ export const testWorkflowEntries: DashboardEntry[] = [
     accessLevel: "Write",
     projectIDs: [3],
     ownerId: 3,
-    coverImage: null,
   }),
 ];
 
@@ -215,7 +207,7 @@ export const testUserProjects: DashboardProject[] = [
 ];
 
 export const mockUserInfo = {
-  1: { userName: "Texera", avatar: "avatar_url_1" },
-  2: { userName: "Angular", avatar: "avatar_url_2" },
-  3: { userName: "UCI", avatar: "avatar_url_3" },
+  1: { userName: "Texera", googleAvatar: "avatar_url_1" },
+  2: { userName: "Angular", googleAvatar: "avatar_url_2" },
+  3: { userName: "UCI", googleAvatar: "avatar_url_3" },
 };

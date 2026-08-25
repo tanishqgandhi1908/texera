@@ -22,5 +22,4 @@ export enum SortMethod {
   NameDesc,
   CreateTimeDesc,
   EditTimeDesc,
-  ExecutionTimeDesc,
 }

@@ -190,11 +190,7 @@ class WorkflowAccessResource() {
       throw new ForbiddenException(s"You do not have permission to modify workflow $wid")
     }
 
-    val targetUser = userDao.fetchOneByEmail(email)
-    if (targetUser == null || targetUser.getIsPlaceholder) {
-      throw new BadRequestException(s"No registered user with email $email")
-    }
-    val userUid = targetUser.getUid
+    val userUid = userDao.fetchOneByEmail(email).getUid
     val workflowOwnerUid = context
       .select(WORKFLOW_OF_USER.UID)
       .from(WORKFLOW_OF_USER)

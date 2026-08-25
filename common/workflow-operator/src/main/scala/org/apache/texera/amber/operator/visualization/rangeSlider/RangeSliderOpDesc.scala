@@ -32,12 +32,11 @@ import org.apache.texera.amber.pybuilder.PythonTemplateBuilder
 
 import javax.validation.constraints.NotNull
 
-// type constraint: Y-axis is aggregated (mean/sum), so it must be numeric;
-// X-axis is only a grouping key and may be any type.
+// type constraint: value can only be numeric
 @JsonSchemaInject(json = """
 {
   "attributeTypeRules": {
-    "Y-axis": {
+    "value": {
       "enum": ["integer", "long", "double"]
     }
   }

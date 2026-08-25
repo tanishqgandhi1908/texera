@@ -98,9 +98,7 @@ class NetworkGraphOpDesc extends PythonOperatorDescriptor {
          |        if not table.empty:
          |            sources = table[$source]
          |            destinations = table[$destination]
-         |            # Union of the two columns, in first-appearance order. Adding the
-         |            # Series pairs them off element-wise; a set reorders per run.
-         |            nodes = list(dict.fromkeys(pd.concat([sources, destinations]).tolist()))
+         |            nodes = set(sources + destinations)
          |            G = nx.Graph()
          |            for node in nodes:
          |                G.add_node(node)

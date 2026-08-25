@@ -19,8 +19,6 @@
 
 import { Component } from "@angular/core";
 import { GuiConfigService } from "./common/service/gui-config.service";
-import { DeploymentVersionService } from "./common/service/deployment-version/deployment-version.service";
-import { Version } from "../environments/version";
 import { UntilDestroy } from "@ngneat/until-destroy";
 
 @UntilDestroy()
@@ -42,24 +40,14 @@ import { UntilDestroy } from "@ngneat/until-destroy";
 export class AppComponent {
   configLoaded = false;
 
-  constructor(
-    private configService: GuiConfigService,
-    private deploymentVersionService: DeploymentVersionService
-  ) {
+  constructor(private config: GuiConfigService) {
     // determine whether configuration was successfully loaded by APP_INITIALIZER
     try {
       // accessing env will throw if not loaded
-      void this.configService.env;
+      void this.config.env;
       this.configLoaded = true;
     } catch {
       this.configLoaded = false;
-    }
-
-    // Poll for new deployments only when the config opts in (off by default),
-    // config actually loaded, and this isn't the "dev" placeholder build where
-    // no deployments occur.
-    if (this.configLoaded && this.configService.env.deploymentVersionCheckEnabled && Version.buildNumber !== "dev") {
-      this.deploymentVersionService.startPollingForUpdates();
     }
   }
 

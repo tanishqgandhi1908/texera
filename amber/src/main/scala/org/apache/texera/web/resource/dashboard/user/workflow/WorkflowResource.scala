@@ -38,12 +38,11 @@ import org.apache.texera.dao.jooq.generated.tables.daos.{
 import org.apache.texera.dao.jooq.generated.tables.pojos._
 import org.apache.texera.service.util.LargeBinaryManager
 import org.apache.texera.web.resource.dashboard.hub.EntityType
-import org.apache.texera.web.service.WarehouseReadGuard
 import org.apache.texera.web.resource.dashboard.hub.HubResource.recordCloneAction
 import org.apache.texera.web.resource.dashboard.user.workflow.WorkflowAccessResource.hasReadAccess
 import org.apache.texera.web.resource.dashboard.user.workflow.WorkflowResource._
-import org.jooq.impl.DSL.{groupConcatDistinct, noCondition, max}
-import org.jooq.{Condition, DSLContext, Record10, Result, SelectOnConditionStep}
+import org.jooq.impl.DSL.{groupConcatDistinct, noCondition}
+import org.jooq.{Condition, DSLContext, Record9, Result, SelectOnConditionStep}
 
 import java.sql.Timestamp
 import java.util
@@ -77,12 +76,6 @@ object WorkflowResource {
       context.configuration()
     )
   private def workflowOfProjectDao = new WorkflowOfProjectDao(context.configuration)
-
-  /** Max length of a stored cover-image data URL. */
-  private val COVER_IMAGE_MAX_CHARS: Int = 4 * 1024 * 1024
-
-  /** JSON body/response for a workflow's cover image data URL. */
-  case class CoverImageRequest(image: String)
 
   def getWorkflowName(wid: Integer): String = {
     val workflow = workflowDao.fetchOneByWid(wid)
@@ -126,8 +119,7 @@ object WorkflowResource {
       ownerName: String,
       workflow: Workflow,
       projectIDs: List[Integer],
-      ownerId: Integer,
-      coverImage: Option[String]
+      ownerId: Integer
   )
 
   case class WorkflowWithPrivilege(
@@ -193,7 +185,7 @@ object WorkflowResource {
     }
   }
 
-  def baseWorkflowSelect(): SelectOnConditionStep[Record10[
+  def baseWorkflowSelect(): SelectOnConditionStep[Record9[
     Integer,
     String,
     String,
@@ -201,7 +193,6 @@ object WorkflowResource {
     Timestamp,
     PrivilegeEnum,
     Integer,
-    String,
     String,
     String
   ]] = {
@@ -215,8 +206,7 @@ object WorkflowResource {
         WORKFLOW_USER_ACCESS.PRIVILEGE,
         WORKFLOW_OF_USER.UID,
         USER.NAME,
-        groupConcatDistinct(WORKFLOW_OF_PROJECT.PID).as("projects"),
-        max(WORKFLOW_COVER_IMAGE.IMAGE).as("cover_image")
+        groupConcatDistinct(WORKFLOW_OF_PROJECT.PID).as("projects")
       )
       .from(WORKFLOW)
       .leftJoin(WORKFLOW_USER_ACCESS)
@@ -227,12 +217,10 @@ object WorkflowResource {
       .on(USER.UID.eq(WORKFLOW_OF_USER.UID))
       .leftJoin(WORKFLOW_OF_PROJECT)
       .on(WORKFLOW.WID.eq(WORKFLOW_OF_PROJECT.WID))
-      .leftJoin(WORKFLOW_COVER_IMAGE)
-      .on(WORKFLOW.WID.eq(WORKFLOW_COVER_IMAGE.WID))
   }
 
   def mapWorkflowEntries(
-      workflowEntries: Result[Record10[
+      workflowEntries: Result[Record9[
         Integer,
         String,
         String,
@@ -240,7 +228,6 @@ object WorkflowResource {
         Timestamp,
         PrivilegeEnum,
         Integer,
-        String,
         String,
         String
       ]],
@@ -262,8 +249,7 @@ object WorkflowResource {
           if (workflowRecord.component9() == null) List[Integer]()
           else
             workflowRecord.component9().split(',').map(str => Integer.valueOf(str)).toList,
-          workflowRecord.into(WORKFLOW_OF_USER).getUid,
-          Option(workflowRecord.get("cover_image", classOf[String]))
+          workflowRecord.into(WORKFLOW_OF_USER).getUid
         )
       )
       .asScala
@@ -549,9 +535,6 @@ class WorkflowResource extends LazyLogging {
       @Auth sessionUser: SessionUser,
       @Context request: HttpServletRequest
   ): Integer = {
-    if (!WorkflowAccessResource.hasReadAccess(wid, sessionUser.getUid)) {
-      throw new ForbiddenException("No sufficient access privilege.")
-    }
     val oldWorkflow: Workflow = workflowDao.fetchOneByWid(wid)
     val newWorkflow: DashboardWorkflow = createWorkflow(
       new Workflow(
@@ -595,8 +578,7 @@ class WorkflowResource extends LazyLogging {
         user.getName,
         workflowDao.fetchOneByWid(workflow.getWid),
         List[Integer](),
-        user.getUid,
-        None
+        user.getUid
       )
     }
 
@@ -658,10 +640,9 @@ class WorkflowResource extends LazyLogging {
       // removed. Done after the transaction (like the document cleanup below).
       eids.foreach(eid => LargeBinaryManager.deleteByExecution(eid.longValue()))
 
-      // Clean up document storage. While per-user warehouses are disabled, cleanup must
-      // not reach into them (#6930) — those URIs are skipped.
+      // Clean up document storage
       try {
-        uris.filterNot(WarehouseReadGuard.skipWhileDisabled(_)).foreach { uri =>
+        uris.foreach { uri =>
           try {
             val (document, _) = DocumentFactory.openDocument(uri)
             document.clear()
@@ -728,73 +709,6 @@ class WorkflowResource extends LazyLogging {
     val workflow: Workflow = workflowDao.fetchOneByWid(wid)
     workflow.setIsPublic(false)
     workflowDao.update(workflow)
-  }
-
-  /** Returns the workflow's cover image; 404 if none set. */
-  @GET
-  @RolesAllowed(Array("REGULAR", "ADMIN"))
-  @Path("/{wid}/cover")
-  def getCoverImage(@PathParam("wid") wid: Integer, @Auth user: SessionUser): CoverImageRequest = {
-    if (!WorkflowAccessResource.hasReadAccess(wid, user.getUid)) {
-      throw new ForbiddenException(s"You do not have access to workflow $wid")
-    }
-    val image = context
-      .select(WORKFLOW_COVER_IMAGE.IMAGE)
-      .from(WORKFLOW_COVER_IMAGE)
-      .where(WORKFLOW_COVER_IMAGE.WID.eq(wid))
-      .fetchOne(WORKFLOW_COVER_IMAGE.IMAGE)
-    if (image == null) {
-      throw new NotFoundException(s"Workflow $wid has no cover image")
-    }
-    CoverImageRequest(image)
-  }
-
-  /** Sets or replaces the workflow's cover image. */
-  @PUT
-  @RolesAllowed(Array("REGULAR", "ADMIN"))
-  @Path("/{wid}/cover")
-  def setCoverImage(
-      @PathParam("wid") wid: Integer,
-      request: CoverImageRequest,
-      @Auth user: SessionUser
-  ): Unit = {
-    if (!WorkflowAccessResource.hasWriteAccess(wid, user.getUid)) {
-      throw new ForbiddenException(s"You do not have permission to modify workflow $wid")
-    }
-    val image = Option(request.image).map(_.trim).getOrElse("")
-    if (image.isEmpty) {
-      throw new BadRequestException("Cover image is required")
-    }
-    if (!image.startsWith("data:image/")) {
-      throw new BadRequestException("Cover image must be an image data URL")
-    }
-    if (image.length > COVER_IMAGE_MAX_CHARS) {
-      throw new BadRequestException(
-        s"Cover image is too large (limit ${COVER_IMAGE_MAX_CHARS / (1024 * 1024)} MB)"
-      )
-    }
-    context
-      .insertInto(WORKFLOW_COVER_IMAGE)
-      .set(WORKFLOW_COVER_IMAGE.WID, wid)
-      .set(WORKFLOW_COVER_IMAGE.IMAGE, image)
-      .onConflict(WORKFLOW_COVER_IMAGE.WID)
-      .doUpdate()
-      .set(WORKFLOW_COVER_IMAGE.IMAGE, image)
-      .execute()
-  }
-
-  /** Removes the workflow's cover image. Idempotent. */
-  @DELETE
-  @RolesAllowed(Array("REGULAR", "ADMIN"))
-  @Path("/{wid}/cover")
-  def deleteCoverImage(@PathParam("wid") wid: Integer, @Auth user: SessionUser): Unit = {
-    if (!WorkflowAccessResource.hasWriteAccess(wid, user.getUid)) {
-      throw new ForbiddenException(s"You do not have permission to modify workflow $wid")
-    }
-    context
-      .deleteFrom(WORKFLOW_COVER_IMAGE)
-      .where(WORKFLOW_COVER_IMAGE.WID.eq(wid))
-      .execute()
   }
 
   @GET
