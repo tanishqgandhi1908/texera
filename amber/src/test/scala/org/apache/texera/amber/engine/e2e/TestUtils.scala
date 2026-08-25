@@ -21,17 +21,21 @@ package org.apache.texera.amber.engine.e2e
 
 import com.twitter.util.{Await, Duration, Promise, Return, Throw, Try}
 import org.apache.pekko.actor.ActorSystem
-import org.apache.texera.common.config.StorageConfig
 import org.apache.texera.amber.core.executor.OpExecInitInfo
 import org.apache.texera.amber.core.storage.DocumentFactory
 import org.apache.texera.amber.core.storage.model.VirtualDocument
 import org.apache.texera.amber.core.tuple.Tuple
-import org.apache.texera.amber.core.virtualidentity.{ExecutionIdentity, OperatorIdentity}
-import org.apache.texera.amber.core.workflow.{PortIdentity, WorkflowContext}
-import org.apache.texera.amber.engine.architecture.controller.{
-  ControllerConfig,
+import org.apache.texera.amber.core.virtualidentity.{
+  ExecutionIdentity,
+  OperatorIdentity,
+  WorkflowIdentity
+}
+import org.apache.texera.amber.core.workflow.{PortIdentity, WorkflowContext, WorkflowSettings}
+import org.apache.texera.amber.engine.architecture.coordinator.{
+  CoordinatorConfig,
   ExecutionStateUpdate,
   FatalError,
+  OperatorPortResultUriAvailable,
   Workflow
 }
 import org.apache.texera.amber.engine.architecture.rpc.controlcommands.{
@@ -60,11 +64,29 @@ import org.apache.texera.dao.jooq.generated.tables.pojos.{
   WorkflowVersion,
   Workflow => WorkflowPojo
 }
-import org.apache.texera.web.model.websocket.request.LogicalPlanPojo
+import org.apache.texera.common.compiler.model.LogicalPlanPojo
 import org.apache.texera.web.resource.dashboard.user.workflow.WorkflowExecutionsResource.getResultUriByLogicalPortId
-import org.apache.texera.workflow.{LogicalLink, WorkflowCompiler}
+import org.apache.texera.web.service.ExecutionResultService
+import org.apache.texera.common.compiler.model.LogicalLink
+import org.apache.texera.common.compiler.{CompilationErrorHandling, WorkflowCompiler}
 
 object TestUtils {
+
+  /**
+    * A WorkflowContext whose workflow- and execution-id are both `id`. Each e2e
+    * suite passes a distinct id so its results land in a disjoint storage
+    * keyspace (`vfs:///wid/{id}/eid/{id}/...`) and disjoint DB rows, letting the
+    * suites run concurrently without colliding on the shared Iceberg catalog.
+    */
+  def workflowContext(
+      id: Int,
+      workflowSettings: WorkflowSettings = WorkflowSettings()
+  ): WorkflowContext =
+    new WorkflowContext(
+      workflowId = WorkflowIdentity(id.toLong),
+      executionId = ExecutionIdentity(id.toLong),
+      workflowSettings = workflowSettings
+    )
 
   def buildWorkflow(
       operators: List[LogicalOp],
@@ -74,9 +96,13 @@ object TestUtils {
     val workflowCompiler = new WorkflowCompiler(
       context
     )
-    workflowCompiler.compile(
-      LogicalPlanPojo(operators, links, List(), List())
+    // Execution path: strict, fail-fast on compilation errors. Strict guarantees
+    // a defined physicalPlan (errors throw rather than clearing it).
+    val compilationResult = workflowCompiler.compile(
+      LogicalPlanPojo(operators, links, List(), List()),
+      CompilationErrorHandling.Strict
     )
+    Workflow.fromCompilationResult(context, compilationResult)
   }
 
   /**
@@ -137,11 +163,19 @@ object TestUtils {
       system,
       workflow.context,
       workflow.physicalPlan,
-      ControllerConfig.default,
+      CoordinatorConfig.default,
       e => completion.updateIfEmpty(Throw(e))
     )
     try {
       client.registerCallback[FatalError](evt => completion.updateIfEmpty(Throw(evt.e)))
+      // The engine emits `OperatorPortResultUriAvailable` for each
+      // materialized output port; production wires this to a DB insert in
+      // `ExecutionResultService.persistOperatorPortResultUri`. The e2e
+      // harness doesn't construct an `ExecutionResultService` (it builds an
+      // `AmberClient` directly), so register the same callback here so the
+      // post-completion `readMaterializedResults` lookup via
+      // `getResultUriByLogicalPortId` finds the rows.
+      registerResultUriPersistence(client, workflow.context.executionId)
       client.registerCallback[ExecutionStateUpdate](evt => {
         if (evt.state == COMPLETED) {
           completion.updateIfEmpty(
@@ -149,12 +183,24 @@ object TestUtils {
           )
         }
       })
-      Await.result(client.controllerInterface.startWorkflow(EmptyRequest(), ()))
+      Await.result(client.coordinatorInterface.startWorkflow(EmptyRequest(), ()))
       Await.result(completion, completionTimeout)
     } finally {
       client.shutdown()
     }
   }
+
+  /**
+    * Mirror the production `OperatorPortResultUriAvailable` → DB write that
+    * `ExecutionResultService.persistOperatorPortResultUri` does, but driven
+    * from a test-owned `AmberClient`. Specs that build their own client
+    * (the harness above, or `shouldReconfigure` for the pause/resume flow)
+    * call this so subsequent `getResultUriByLogicalPortId` lookups succeed.
+    */
+  def registerResultUriPersistence(client: AmberClient, executionId: ExecutionIdentity): Unit =
+    client.registerCallback[OperatorPortResultUriAvailable](evt =>
+      ExecutionResultService.persistOperatorPortResultUri(executionId, evt)
+    )
 
   /**
     * Convenience over `runWorkflowAndReadResults` for the common case: run
@@ -177,62 +223,84 @@ object TestUtils {
     * If a test case accesses the user system through singleton resources that cache the DSLContext (e.g., executes a
     * workflow, which accesses WorkflowExecutionsResource), we use a separate texera_db specifically for such test cases.
     * Note such test cases need to clean up the database at the end of running each test case.
+    *
+    * This backs the e2e specs with MockTexeraDB's embedded Postgres instead of an external test Postgres
+    * (depends on #4179).
     */
   def initiateTexeraDBForTestCases(): Unit = {
+    org.apache.texera.dao.MockTexeraDB.ensureInitialized()
+    val embedded = org.apache.texera.dao.MockTexeraDB.getDBInstance
+
+    val dbName = "texera_db_for_test_cases_" + java.util.UUID.randomUUID().toString.replace("-", "")
+
+    scala.util.Using.resource(embedded.getPostgresDatabase.getConnection) { conn =>
+      scala.util.Using.resource(conn.createStatement()) { stmt =>
+        stmt.execute(s"CREATE DATABASE $dbName")
+      }
+    }
+
+    scala.util.Using.resource(embedded.getDatabase("postgres", dbName).getConnection) {
+      targetDbConn =>
+        scala.util.Using.resource(targetDbConn.createStatement()) { stmt =>
+          stmt.execute(org.apache.texera.dao.MockTexeraDB.getDDLScript)
+        }
+    }
+
     SqlServer.initConnection(
-      StorageConfig.jdbcUrlForTestCases,
-      StorageConfig.jdbcUsername,
-      StorageConfig.jdbcPassword
+      embedded.getJdbcUrl("postgres", dbName),
+      "postgres",
+      ""
     )
   }
 
-  val testUser: User = {
+  // All fixture rows for one suite share `id` as uid/wid/vid/eid; the email is
+  // derived from it so concurrent suites don't collide on the unique email key.
+  def testUser(id: Int): User = {
     val user = new User
-    user.setUid(Integer.valueOf(1))
-    user.setName("test_user")
+    user.setUid(Integer.valueOf(id))
+    user.setName(s"test_user_$id")
     user.setRole(UserRoleEnum.ADMIN)
-    user.setPassword("123")
-    user.setEmail("test_user@test.com")
+    user.setEmail(s"test_user_$id@test.com")
     user
   }
 
-  val testWorkflowEntry: WorkflowPojo = {
+  def testWorkflowEntry(id: Int): WorkflowPojo = {
     val workflow = new WorkflowPojo
     workflow.setName("test workflow")
-    workflow.setWid(Integer.valueOf(1))
+    workflow.setWid(Integer.valueOf(id))
     workflow.setContent("test workflow content")
     workflow.setDescription("test description")
     workflow
   }
 
-  val testWorkflowVersionEntry: WorkflowVersion = {
+  def testWorkflowVersionEntry(id: Int): WorkflowVersion = {
     val workflowVersion = new WorkflowVersion
-    workflowVersion.setWid(Integer.valueOf(1))
-    workflowVersion.setVid(Integer.valueOf(1))
+    workflowVersion.setWid(Integer.valueOf(id))
+    workflowVersion.setVid(Integer.valueOf(id))
     workflowVersion.setContent("test version content")
     workflowVersion
   }
 
-  val testWorkflowExecutionEntry: WorkflowExecutions = {
+  def testWorkflowExecutionEntry(id: Int): WorkflowExecutions = {
     val workflowExecution = new WorkflowExecutions
-    workflowExecution.setEid(Integer.valueOf(1))
-    workflowExecution.setVid(Integer.valueOf(1))
-    workflowExecution.setUid(Integer.valueOf(1))
+    workflowExecution.setEid(Integer.valueOf(id))
+    workflowExecution.setVid(Integer.valueOf(id))
+    workflowExecution.setUid(Integer.valueOf(id))
     workflowExecution.setStatus(3.toByte)
     workflowExecution.setEnvironmentVersion("test engine")
     workflowExecution
   }
 
-  def setUpWorkflowExecutionData(): Unit = {
+  def setUpWorkflowExecutionData(id: Int): Unit = {
     val dslConfig = SqlServer.getInstance().context.configuration()
     val userDao = new UserDao(dslConfig)
     val workflowDao = new WorkflowDao(dslConfig)
     val workflowExecutionsDao = new WorkflowExecutionsDao(dslConfig)
     val workflowVersionDao = new WorkflowVersionDao(dslConfig)
-    userDao.insert(testUser)
-    workflowDao.insert(testWorkflowEntry)
-    workflowVersionDao.insert(testWorkflowVersionEntry)
-    workflowExecutionsDao.insert(testWorkflowExecutionEntry)
+    userDao.insert(testUser(id))
+    workflowDao.insert(testWorkflowEntry(id))
+    workflowVersionDao.insert(testWorkflowVersionEntry(id))
+    workflowExecutionsDao.insert(testWorkflowExecutionEntry(id))
   }
 
   /**
@@ -276,9 +344,12 @@ object TestUtils {
       system,
       workflow.context,
       workflow.physicalPlan,
-      ControllerConfig.default,
+      CoordinatorConfig.default,
       error => {}
     )
+    // Timeout for control-command acks (start/pause/reconfigure/resume).
+    val commandTimeout = Duration.fromSeconds(30)
+    registerResultUriPersistence(client, workflow.context.executionId)
     val completion = Promise[Unit]()
     var result: Map[OperatorIdentity, List[Tuple]] = null
     client.registerCallback[ExecutionStateUpdate](evt => {
@@ -288,46 +359,46 @@ object TestUtils {
       }
     })
     Await.result(
-      client.controllerInterface.startWorkflow(EmptyRequest(), ()),
-      Duration.fromSeconds(5)
+      client.coordinatorInterface.startWorkflow(EmptyRequest(), ()),
+      commandTimeout
     )
     val pausedReached = stateReached(client, PAUSED)
     Await.result(
-      client.controllerInterface.pauseWorkflow(EmptyRequest(), ()),
-      Duration.fromSeconds(5)
+      client.coordinatorInterface.pauseWorkflow(EmptyRequest(), ()),
+      commandTimeout
     )
-    Await.result(pausedReached, Duration.fromSeconds(10))
+    Await.result(pausedReached, commandTimeout)
     val physicalOps = targetOps.flatMap(op =>
       workflow.physicalPlan.getPhysicalOpsOfLogicalOp(op.operatorIdentifier)
     )
     Await.result(
-      client.controllerInterface.reconfigureWorkflow(
+      client.coordinatorInterface.reconfigureWorkflow(
         WorkflowReconfigureRequest(
           reconfiguration = physicalOps.map(op => UpdateExecutorRequest(op.id, newOpExecInitInfo)),
           reconfigurationId = "test-reconfigure-1"
         ),
         ()
       ),
-      Duration.fromSeconds(5)
+      commandTimeout
     )
     Await.result(
-      client.controllerInterface.resumeWorkflow(EmptyRequest(), ()),
-      Duration.fromSeconds(5)
+      client.coordinatorInterface.resumeWorkflow(EmptyRequest(), ()),
+      commandTimeout
     )
     Await.result(completion, Duration.fromMinutes(1))
     result
   }
 
-  def cleanupWorkflowExecutionData(): Unit = {
+  def cleanupWorkflowExecutionData(id: Int): Unit = {
     val dslConfig = SqlServer.getInstance().context.configuration()
     val userDao = new UserDao(dslConfig)
     val workflowDao = new WorkflowDao(dslConfig)
     val workflowExecutionsDao = new WorkflowExecutionsDao(dslConfig)
     val workflowVersionDao = new WorkflowVersionDao(dslConfig)
-    workflowExecutionsDao.deleteById(1)
-    workflowVersionDao.deleteById(1)
-    workflowDao.deleteById(1)
-    userDao.deleteById(1)
+    workflowExecutionsDao.deleteById(id)
+    workflowVersionDao.deleteById(id)
+    workflowDao.deleteById(id)
+    userDao.deleteById(id)
   }
 
 }

@@ -19,6 +19,7 @@
 
 import { DatePipe, Location } from "@angular/common";
 import { ComponentFixture, TestBed } from "@angular/core/testing";
+import { By } from "@angular/platform-browser";
 import { HttpClientTestingModule } from "@angular/common/http/testing";
 import { RouterTestingModule } from "@angular/router/testing";
 import { NzModalService, NzModalModule, NzModalRef } from "ng-zorro-antd/modal";
@@ -48,7 +49,11 @@ import type { ModalOptions } from "ng-zorro-antd/modal";
 import type { ComputingUnitSelectionComponent } from "../power-button/computing-unit-selection.component";
 import { WorkflowContent } from "../../../common/type/workflow";
 import { Router } from "@angular/router";
+import { ReportGenerationService } from "../../service/report-generation/report-generation.service";
 import { USER_WORKFLOW } from "../../../app-routing.constant";
+import { GuiConfigService } from "../../../common/service/gui-config.service";
+import { MockGuiConfigService } from "../../../common/service/gui-config.service.mock";
+import { JupyterPanelService } from "../../service/jupyter-panel/jupyter-panel.service";
 import type { Mocked } from "vitest";
 
 vi.mock("file-saver", () => ({ saveAs: vi.fn() }));
@@ -307,7 +312,6 @@ describe("MenuComponent", () => {
   describe("runWorkflow", () => {
     beforeEach(() => {
       component.computingUnitSelectionComponent = {
-        newComputingUnitName: "",
         showAddComputeUnitModalVisible: vi.fn(),
       } as unknown as Mocked<ComputingUnitSelectionComponent>;
     });
@@ -342,7 +346,9 @@ describe("MenuComponent", () => {
 
       component.runWorkflow();
 
-      expect(component.computingUnitSelectionComponent.newComputingUnitName).toBe("wf's Computing Unit");
+      expect(component.computingUnitSelectionComponent.showAddComputeUnitModalVisible).toHaveBeenCalledWith(
+        "wf's Computing Unit"
+      );
       expect(component.computingUnitSelectionComponent.showAddComputeUnitModalVisible).toHaveBeenCalledTimes(1);
       expect(executeSpy).not.toHaveBeenCalled();
     });
@@ -369,6 +375,23 @@ describe("MenuComponent", () => {
     component.onWorkflowNameChange();
 
     expect(setNameSpy).toHaveBeenCalledWith("renamed");
+  });
+
+  // Regression coverage for #6846 (resolved by discussion #6873): the toolbar's
+  // import button wiped `wid` before auto-persist and thereby created a spurious
+  // duplicate workflow, so it was removed. Creating a workflow from a JSON file
+  // is covered by the dashboard workflow-list upload button instead.
+  describe("import workflow removal", () => {
+    it("does not render an import upload control in the toolbar", () => {
+      const element: HTMLElement = fixture.nativeElement;
+
+      expect(element.querySelector("nz-upload")).toBeNull();
+      expect(element.querySelector("button[title='import workflow']")).toBeNull();
+    });
+
+    it("does not define an onClickImportWorkflow handler", () => {
+      expect((component as any).onClickImportWorkflow).toBeUndefined();
+    });
   });
 
   describe("onClickExportWorkflow (save)", () => {
@@ -782,6 +805,415 @@ describe("MenuComponent", () => {
 
       status$.next(ComputingUnitState.NoComputingUnit);
       expect(cuComponent.computingUnitStatus).toBe(ComputingUnitState.Running);
+    });
+  });
+
+  describe("grid / worker-count toggles, report, and name sizing", () => {
+    it("toggleGrid sets the joint paper grid size from the flag", () => {
+      const setGridSize = vi.fn();
+      vi.spyOn(workflowActionService, "getJointGraphWrapper").mockReturnValue({ mainPaper: { setGridSize } } as any);
+
+      component.showGrid = true;
+      component.toggleGrid();
+      expect(setGridSize).toHaveBeenCalledWith(2);
+
+      component.showGrid = false;
+      component.toggleGrid();
+      expect(setGridSize).toHaveBeenCalledWith(1);
+    });
+
+    it("toggleNumWorkers toggles the hide-worker-count class from the flag", () => {
+      const el = document.createElement("div");
+      vi.spyOn(workflowActionService, "getJointGraphWrapper").mockReturnValue({
+        mainPaper: { el, model: { getElements: () => [] } },
+      } as any);
+
+      component.showNumWorkers = false;
+      component.toggleNumWorkers();
+      expect(el.classList.contains("hide-worker-count")).toBe(true);
+
+      component.showNumWorkers = true;
+      component.toggleNumWorkers();
+      expect(el.classList.contains("hide-worker-count")).toBe(false);
+    });
+
+    it("onClickGenerateReport shows a blocking notification and builds the report html", () => {
+      const reportService = TestBed.inject(ReportGenerationService);
+      const blankSpy = vi.spyOn(notificationService, "blank");
+      vi.spyOn(reportService, "generateWorkflowSnapshot").mockReturnValue(of("snap-url"));
+      vi.spyOn(reportService, "getAllOperatorResults").mockReturnValue(of([]));
+      const htmlSpy = vi.spyOn(reportService, "generateReportAsHtml").mockImplementation(() => {});
+
+      component.onClickGenerateReport();
+
+      expect(blankSpy).toHaveBeenCalled();
+      expect(htmlSpy).toHaveBeenCalledWith("snap-url", [], expect.any(String));
+    });
+
+    it("adjustWorkflowNameWidth is a no-op when the name input is absent", () => {
+      component.workflowNameInput = undefined;
+      expect(() => component.adjustWorkflowNameWidth()).not.toThrow();
+    });
+
+    it("adjustWorkflowNameWidth sizes the input in px to fit its text", () => {
+      const input = document.createElement("input");
+      input.value = "my workflow";
+      component.workflowNameInput = { nativeElement: input } as typeof component.workflowNameInput;
+
+      component.adjustWorkflowNameWidth();
+
+      expect(input.style.width).toMatch(/^\d+px$/);
+    });
+  });
+
+  describe("expand jupyter notebook panel", () => {
+    it("onClickExpandJupyterNotebookPanel delegates to JupyterPanelService", () => {
+      const openSpy = vi
+        .spyOn(TestBed.inject(JupyterPanelService), "openJupyterNotebookPanel")
+        .mockImplementation(() => {});
+
+      component.onClickExpandJupyterNotebookPanel();
+
+      expect(openSpy).toHaveBeenCalled();
+    });
+
+    it("shows the expand-jupyter button only when the flag is on and a notebook exists", () => {
+      const button = () => fixture.nativeElement.querySelector('button[title="expand Jupyter notebook"]');
+      // commonTestProviders' MockGuiConfigService defaults the flag to false, and no notebook exists.
+      expect(button()).toBeNull();
+
+      (TestBed.inject(GuiConfigService) as unknown as MockGuiConfigService).setConfig({
+        pythonNotebookMigrationEnabled: true,
+      });
+      fixture.detectChanges();
+      // Flag on but the current workflow still has no notebook -> hidden.
+      expect(button()).toBeNull();
+
+      (TestBed.inject(JupyterPanelService) as any).jupyterNotebookExists$ = of(true);
+      fixture.detectChanges();
+      // Flag on and a notebook exists -> shown.
+      expect(button()).not.toBeNull();
+    });
+
+    it("clicking the expand-jupyter button opens the panel", () => {
+      const openSpy = vi
+        .spyOn(TestBed.inject(JupyterPanelService), "openJupyterNotebookPanel")
+        .mockImplementation(() => {});
+      (TestBed.inject(GuiConfigService) as unknown as MockGuiConfigService).setConfig({
+        pythonNotebookMigrationEnabled: true,
+      });
+      (TestBed.inject(JupyterPanelService) as any).jupyterNotebookExists$ = of(true);
+      fixture.detectChanges();
+
+      const button = fixture.nativeElement.querySelector(
+        'button[title="expand Jupyter notebook"]'
+      ) as HTMLButtonElement;
+      button.click();
+
+      expect(openSpy).toHaveBeenCalled();
+    });
+  });
+  /**
+   * The toolbar's buttons and switches are wired in the template, and the suite above calls the
+   * handlers directly. That is not the same thing: coverage for `(click)="onClickX()"` lands on the
+   * generated listener body, which only runs when the element is really clicked — so a button wired
+   * to the wrong handler, or to none, looks perfectly tested today.
+   */
+  describe("toolbar wiring", () => {
+    function host(): HTMLElement {
+      return fixture.nativeElement as HTMLElement;
+    }
+
+    /** The button carrying the given title attribute. */
+    function button(title: string): HTMLButtonElement {
+      const found = host().querySelector<HTMLButtonElement>(`button[title="${title}"]`);
+      expect(found, `no button titled "${title}"`).not.toBeNull();
+      return found!;
+    }
+
+    /** Clicks the button and reports whether the spied handler ran exactly once. */
+    function clicking(title: string, owner: object, method: string): boolean {
+      const spy = vi.spyOn(owner as any, method).mockImplementation(() => {});
+      button(title).click();
+      const ran = spy.mock.calls.length === 1;
+      spy.mockRestore();
+      return ran;
+    }
+
+    it("routes each toolbar button to its own handler", () => {
+      // Table-driven because these buttons are visually near-identical icon buttons; a copy-paste
+      // that leaves two of them on the same handler is the realistic defect and is invisible on
+      // screen. Each entry is clicked for real, not invoked.
+      const wiring: Array<[string, object, string]> = [
+        ["close panels", component, "onClickClosePanels"],
+        ["reset panels", component, "onClickResetPanels"],
+        ["generate report", component, "onClickGenerateReport"],
+        ["reset zoom", component, "onClickRestoreZoomOffsetDefault"],
+        ["auto layout", component, "onClickAutoLayout"],
+        ["add a comment", component, "onClickAddCommentBox"],
+      ];
+
+      const results = wiring.map(([title, owner, method]) => `${title}:${clicking(title, owner, method)}`);
+
+      expect(results).toEqual(wiring.map(([title]) => `${title}:true`));
+    });
+
+    it("does not fire a neighbour's handler when one button is clicked", () => {
+      // The other half of the same concern: clicking auto-layout must not also reset the panels.
+      const layout = vi.spyOn(component, "onClickAutoLayout").mockImplementation(() => {});
+      const reset = vi.spyOn(component, "onClickResetPanels").mockImplementation(() => {});
+
+      button("auto layout").click();
+
+      expect(layout).toHaveBeenCalledTimes(1);
+      expect(reset).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * The suite above calls the handlers directly; these fire them from the rendered markup, so a
+   * control that loses its binding fails here. The utilities block is reached through
+   * `#expanded-utilities`, the outlet that renders it inline — the dropdown outlet next to it
+   * needs a CDK overlay, which jsdom never attaches.
+   */
+  describe("rendered menu", () => {
+    const q = (selector: string) => fixture.debugElement.query(By.css(selector));
+    const utility = (title: string) => q(`#expanded-utilities button[title="${title}"]`);
+    const toolbar = (title: string) => q(`button[title="${title}"]`);
+    /** Undo/redo and export carry no title; they are identified by the icon they render. */
+    const buttonWithIcon = (icon: string) => q(`#expanded-utilities i[nztype="${icon}"]`).parent!;
+
+    afterEach(() => {
+      fixture.destroy();
+      vi.restoreAllMocks();
+    });
+
+    describe("version display bar", () => {
+      /** Puts the menu into the "viewing an older version" state and renders it. */
+      function showVersion(versionId: number | null = 7): void {
+        component.displayParticularWorkflowVersion = true;
+        workflowVersionService.selectedDisplayedVersionId.next(versionId);
+        fixture.detectChanges();
+      }
+
+      it("swaps the name input for the version label and a way back", () => {
+        const closeSpy = vi.spyOn(component, "closeParticularVersionDisplay").mockImplementation(() => {});
+        showVersion();
+
+        expect(q("input.workflow-name")).toBeNull();
+        toolbar("back").triggerEventHandler("click", null);
+
+        expect(closeSpy).toHaveBeenCalled();
+      });
+
+      it("offers restore only while the version service allows it", () => {
+        const revertSpy = vi.spyOn(component, "revertToVersion").mockImplementation(() => {});
+        vi.spyOn(workflowVersionService, "canRestoreVersion", "get").mockReturnValue(false);
+        showVersion();
+
+        const restore = fixture.debugElement
+          .queryAll(By.css("button"))
+          .find(b => (b.nativeElement.textContent ?? "").trim() === "Restore this version")!;
+        expect(restore.nativeElement.disabled).toBe(true);
+
+        vi.spyOn(workflowVersionService, "canRestoreVersion", "get").mockReturnValue(true);
+        fixture.detectChanges();
+        expect(restore.nativeElement.disabled).toBe(false);
+
+        restore.triggerEventHandler("click", null);
+        expect(revertSpy).toHaveBeenCalled();
+      });
+
+      it("offers cloning the displayed version", () => {
+        const cloneSpy = vi.spyOn(component, "cloneVersion").mockImplementation(() => {});
+        showVersion();
+
+        fixture.debugElement
+          .queryAll(By.css("button"))
+          .find(b => (b.nativeElement.textContent ?? "").trim() === "Clone this version")!
+          .triggerEventHandler("click", null);
+
+        expect(cloneSpy).toHaveBeenCalled();
+      });
+
+      it("names the displayed version, and says nothing when there is none", () => {
+        showVersion(7);
+        expect(q('[title="Current Version"]').nativeElement.textContent).toContain("7");
+
+        showVersion(null);
+        expect(q('[title="Current Version"]')).toBeNull();
+      });
+
+      it("renders an icon per co-editor", () => {
+        component.coeditorPresenceService.coeditors = [
+          { clientId: "a", user: { name: "ann" } },
+          { clientId: "b", user: { name: "bo" } },
+        ] as never;
+        fixture.detectChanges();
+
+        expect(fixture.debugElement.queryAll(By.css("texera-coeditor-user-icon")).length).toBe(2);
+      });
+    });
+
+    describe("workflow name field", () => {
+      it("shows the id badge and reports typing and committing the name", () => {
+        const widthSpy = vi.spyOn(component, "adjustWorkflowNameWidth").mockImplementation(() => {});
+        const changeSpy = vi.spyOn(component, "onWorkflowNameChange").mockImplementation(() => {});
+        component.workflowId = 42;
+        fixture.detectChanges();
+
+        expect(q("#metadata nz-avatar")).not.toBeNull();
+        const nameInput = q("input.workflow-name");
+        nameInput.triggerEventHandler("input", { target: nameInput.nativeElement });
+        nameInput.triggerEventHandler("change", { target: nameInput.nativeElement });
+
+        expect(widthSpy).toHaveBeenCalled();
+        expect(changeSpy).toHaveBeenCalled();
+      });
+
+      it("drops the id badge when there is no workflow yet", () => {
+        component.workflowId = undefined;
+        fixture.detectChanges();
+
+        expect(q("#metadata nz-avatar")).toBeNull();
+      });
+    });
+
+    describe("execution buttons", () => {
+      it("wires share, kill and run", () => {
+        const share = vi.spyOn(component, "onClickOpenShareAccess").mockResolvedValue(undefined);
+        const kill = vi.spyOn(component, "handleKill").mockImplementation(() => {});
+        const run = vi.spyOn(component, "onClickRunHandler").mockImplementation(() => {});
+        fixture.detectChanges();
+
+        q("#share-button").triggerEventHandler("click", null);
+        q("button[nzdanger]").triggerEventHandler("click", null);
+        q("#run-button").triggerEventHandler("click", null);
+
+        expect(share).toHaveBeenCalled();
+        expect(run).toHaveBeenCalled();
+        expect(kill).toHaveBeenCalled();
+      });
+    });
+
+    describe("toolbar", () => {
+      it("wires each toolbar button to its handler", () => {
+        const spies = {
+          create: vi.spyOn(component, "onClickCreateNewWorkflow").mockImplementation(() => {}),
+          save: vi.spyOn(component, "persistWorkflow").mockImplementation(() => {}),
+          deleteAll: vi.spyOn(component, "onClickDeleteAllOperators").mockImplementation(() => {}),
+          exportWorkflow: vi.spyOn(component, "onClickExportWorkflow").mockImplementation(() => {}),
+          description: vi.spyOn(component, "onClickEditDescription").mockImplementation(() => {}),
+        };
+        fixture.detectChanges();
+
+        toolbar("create new").triggerEventHandler("click", null);
+        toolbar("save").triggerEventHandler("click", null);
+        toolbar("delete all").triggerEventHandler("click", null);
+        toolbar("export workflow").triggerEventHandler("click", null);
+        toolbar("change description").triggerEventHandler("click", null);
+
+        Object.values(spies).forEach(spy => expect(spy).toHaveBeenCalled());
+      });
+    });
+
+    describe("operator actions", () => {
+      it("keeps the operator actions disabled while nothing is selected", () => {
+        component.operatorMenu.isDisableOperatorClickable = false;
+        component.operatorMenu.isToViewResultClickable = false;
+        component.operatorMenu.isReuseResultClickable = false;
+        fixture.detectChanges();
+
+        expect(utility("disable operators").nativeElement.disabled).toBe(true);
+        expect(utility("view result").nativeElement.disabled).toBe(true);
+        expect(utility("reuse result if possible").nativeElement.disabled).toBe(true);
+      });
+
+      it("wires each operator action in both of its rendered states", () => {
+        const disable = vi.spyOn(component.operatorMenu, "disableHighlightedOperators").mockImplementation(() => {});
+        const view = vi.spyOn(component.operatorMenu, "viewResultHighlightedOperators").mockImplementation(() => {});
+        const reuse = vi.spyOn(component.operatorMenu, "reuseResultHighlightedOperator").mockImplementation(() => {});
+        const menu = component.operatorMenu;
+        menu.isDisableOperatorClickable = true;
+        menu.isToViewResultClickable = true;
+        menu.isReuseResultClickable = true;
+
+        // Each action renders as one of two buttons depending on the state it would move to.
+        menu.isDisableOperator = true;
+        menu.isToViewResult = true;
+        menu.isMarkForReuse = true;
+        fixture.detectChanges();
+        expect(utility("disable operators").nativeElement.disabled).toBe(false);
+        utility("disable operators").triggerEventHandler("click", null);
+        utility("view result").triggerEventHandler("click", null);
+        // The "reuse result if possible" button is hard-disabled in the template
+        // (`[disabled]="true || …"`), so it is asserted, not clicked — firing its handler
+        // would claim an interaction the UI cannot perform.
+        expect(utility("reuse result if possible").nativeElement.disabled).toBe(true);
+
+        menu.isDisableOperator = false;
+        menu.isToViewResult = false;
+        menu.isMarkForReuse = false;
+        fixture.detectChanges();
+        utility("operators disabled, click to re-enable").triggerEventHandler("click", null);
+        utility("click to remove view result").triggerEventHandler("click", null);
+        utility("remove reusing previous result").triggerEventHandler("click", null);
+
+        expect(disable).toHaveBeenCalledTimes(2);
+        expect(view).toHaveBeenCalledTimes(2);
+        expect(reuse).toHaveBeenCalledTimes(1);
+      });
+
+      it("wires the export-result button", () => {
+        const exportSpy = vi.spyOn(component, "onClickExportExecutionResult").mockImplementation(() => {});
+        component.isExportDeactivate = false;
+        fixture.detectChanges();
+
+        buttonWithIcon("cloud-download").triggerEventHandler("click", null);
+
+        expect(exportSpy).toHaveBeenCalled();
+      });
+
+      it("wires undo and redo, and disables them while an older version is displayed", () => {
+        const undo = vi.spyOn(component.undoRedoService, "undoAction").mockImplementation(() => {});
+        const redo = vi.spyOn(component.undoRedoService, "redoAction").mockImplementation(() => {});
+        vi.spyOn(component.undoRedoService, "canUndo").mockReturnValue(true);
+        vi.spyOn(component.undoRedoService, "canRedo").mockReturnValue(true);
+        fixture.detectChanges();
+
+        buttonWithIcon("undo").triggerEventHandler("click", null);
+        buttonWithIcon("redo").triggerEventHandler("click", null);
+        expect(undo).toHaveBeenCalled();
+        expect(redo).toHaveBeenCalled();
+
+        // Viewing an older version makes the graph read-only, so history is off limits.
+        component.displayParticularWorkflowVersion = true;
+        fixture.detectChanges();
+        expect(buttonWithIcon("undo").nativeElement.disabled).toBe(true);
+        expect(buttonWithIcon("redo").nativeElement.disabled).toBe(true);
+      });
+    });
+
+    describe("checkpoint button", () => {
+      it("appears only with time travel on, and is enabled only while paused", () => {
+        const checkpoint = vi.spyOn(component, "handleCheckpoint").mockImplementation(() => {});
+        const guiConfig = TestBed.inject(GuiConfigService);
+        guiConfig.env.timetravelEnabled = false;
+        fixture.detectChanges();
+        expect(q("#checkpoint-button")).toBeNull();
+
+        guiConfig.env.timetravelEnabled = true;
+        component.executionState = ExecutionState.Running;
+        fixture.detectChanges();
+        expect(q("#checkpoint-button").nativeElement.disabled).toBe(true);
+
+        component.executionState = ExecutionState.Paused;
+        fixture.detectChanges();
+        expect(q("#checkpoint-button").nativeElement.disabled).toBe(false);
+
+        q("#checkpoint-button").triggerEventHandler("click", null);
+        expect(checkpoint).toHaveBeenCalled();
+      });
     });
   });
 });

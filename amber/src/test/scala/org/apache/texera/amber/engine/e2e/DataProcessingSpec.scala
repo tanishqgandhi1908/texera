@@ -31,7 +31,7 @@ import org.apache.texera.amber.core.workflow.{
   WorkflowContext,
   WorkflowSettings
 }
-import org.apache.texera.amber.engine.architecture.controller._
+import org.apache.texera.amber.engine.architecture.coordinator._
 import org.apache.texera.amber.engine.common.AmberRuntime
 import org.apache.texera.amber.engine.e2e.TestUtils.{
   buildWorkflow,
@@ -42,7 +42,7 @@ import org.apache.texera.amber.engine.e2e.TestUtils.{
 }
 import org.apache.texera.amber.operator.TestOperators
 import org.apache.texera.amber.operator.aggregate.AggregationFunction
-import org.apache.texera.workflow.LogicalLink
+import org.apache.texera.common.compiler.model.LogicalLink
 import org.scalatest.flatspec.AnyFlatSpecLike
 import org.scalatest.{BeforeAndAfterAll, BeforeAndAfterEach, Outcome, Retries}
 
@@ -66,21 +66,24 @@ class DataProcessingSpec
 
   implicit val timeout: Timeout = Timeout(5.seconds)
 
-  val workflowContext: WorkflowContext = new WorkflowContext()
+  private val specId = 1
 
-  val materializedWorkflowContext: WorkflowContext = new WorkflowContext(
-    workflowSettings = WorkflowSettings(
+  val workflowContext: WorkflowContext = TestUtils.workflowContext(specId)
+
+  val materializedWorkflowContext: WorkflowContext = TestUtils.workflowContext(
+    specId,
+    WorkflowSettings(
       dataTransferBatchSize = 400,
       executionMode = ExecutionMode.MATERIALIZED
     )
   )
 
   override protected def beforeEach(): Unit = {
-    setUpWorkflowExecutionData()
+    setUpWorkflowExecutionData(specId)
   }
 
   override protected def afterEach(): Unit = {
-    cleanupWorkflowExecutionData()
+    cleanupWorkflowExecutionData(specId)
   }
 
   override def beforeAll(): Unit = {
