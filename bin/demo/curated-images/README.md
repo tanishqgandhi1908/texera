@@ -35,12 +35,23 @@ Minimum for the mirror to work:
 
 ```bash
 minikube delete && minikube start --insecure-registry "10.96.0.0/12"
-kubectl apply -f https://raw.githubusercontent.com/rancher/local-path-provisioner/master/deploy/local-path-storage.yaml
+minikube addons enable metrics-server
 ```
 
 `--insecure-registry` only applies at cluster creation, hence the `delete` — without it the
-push is rejected on TLS. The local-path provisioner is needed because the registry claims a
-PVC; without a StorageClass the registry pod sits `Pending` and every mirror fails.
+push is rejected on TLS. Note it does *not* appear in `/etc/docker/daemon.json`; it is passed
+as a dockerd flag, so verify it with:
+
+```bash
+minikube ssh -- "docker info | grep -A3 'Insecure Registries'"
+```
+
+`metrics-server` is required: creating a computing unit queries the pod metrics API, and
+without it the create call fails with `metrics.k8s.io/v1beta1 ... Not Found`.
+
+The registry claims a PVC, so the cluster needs a default StorageClass. minikube provides
+one (`standard`, via the `storage-provisioner` addon) and the PVC binds in seconds — the
+Rancher local-path provisioner is only needed on a cluster that has none.
 
 Then install the chart (see `docs/getting-started/run-on-kubernetes.md`):
 
@@ -66,7 +77,7 @@ The engine image is itself a valid curated image, so this needs no Docker Hub ac
 
 1. Sign in as an administrator.
 2. **Admin → CU Images**.
-3. **Name** `Texera Default (test)`, **Docker Hub link**
+3. **Name** `Texera Default test`, **Docker Hub link**
    `ghcr.io/apache/texera-workflow-execution-coordinator:latest`, then **Add**.
 
 Expected: `MIRRORING`, then `READY` on its own — the page polls. **Pulled from** fills in
@@ -100,38 +111,65 @@ ordering is broken and layers are being downloaded before the check.
 
 ## Test 2 — a real ML image
 
-`computing-unit-sklearn.dockerfile` adds scikit-learn, which the default image does not
-have. That is what makes it a test rather than a tautology: the same UDF fails on the
-default image and works on this one.
+`computing-unit-ml.dockerfile` adds **xgboost**, which the stock computing-unit image does
+not have. That is what makes it a test rather than a tautology: the same UDF fails on the
+stock image and works on this one.
+
+> **Why xgboost and not scikit-learn.** The stock image already ships scikit-learn, torch and
+> transformers. An image that only adds scikit-learn therefore proves nothing — the control
+> workflow succeeds on both images and the comparison is vacuous. Pick a package the stock
+> image genuinely lacks. scikit-learn is still pinned *down* here (1.5.2 against the stock
+> 1.7.2) as a second, softer signal: the version the workflow prints tells you which image ran.
 
 ```bash
 cd bin/demo/curated-images
-docker build -f computing-unit-sklearn.dockerfile -t <your-account>/texera-cu-sklearn:1.0 .
-docker push <your-account>/texera-cu-sklearn:1.0
+docker build -f computing-unit-ml.dockerfile -t <your-account>/texera-cu-ml:1.0 .
+docker push <your-account>/texera-cu-ml:1.0
 ```
 
 The build ends with an import check, so a broken image fails there rather than surfacing as
 an `ImportError` inside a workflow later.
 
-Register it as `Python ML (sklearn)`, wait for `READY`, then:
+Register it as `Python ML xgboost`, wait for `READY`, then:
 
 1. Create a computing unit and pick it from the **Image** dropdown.
 2. First start pulls ~5.5 GB, so allow time; later units on the same node are fast because
    the layers are cached.
-3. Any source operator → **Python UDF**, pasting `udf_sklearn_test.py`.
-4. Run. Expected: five rows with `sklearn_version` `1.5.2`, a predicted iris species and a
-   confidence each.
+3. Drop a **Python UDF Source** operator and paste `udf_ml_source.py`. (Use the source
+   variant: a plain Python UDF is a transform and needs an upstream operator, so a workflow
+   containing only one is *Invalid*. `udf_ml_test.py` is the transform version if you would
+   rather wire up a source in front of it.)
+4. Run. Expected: five rows with `xgboost_version` `2.1.1`, `sklearn_version` `1.5.2`, a
+   predicted iris species and a confidence each.
 
 ### The control — this is what proves it
 
-Create a second unit **without** selecting an image and run the same workflow. It must fail:
+Register the stock engine image as a second curated image and start a unit from **that**,
+then run the same workflow. It must fail:
 
 ```
-ModuleNotFoundError: No module named 'sklearn'
+ModuleNotFoundError: No module named 'xgboost'
 ```
 
 If it succeeds on both, the image selection is not load-bearing and something is wrong.
 That failure is the evidence.
+
+> **Do not use "a unit with no image selected" as the control.** The `image-name` default in
+> `kubernetes.conf` points at a registry path that is not publicly pullable, so such a unit
+> never leaves `ImagePullBackOff` and there is no workflow failure to observe. Starting the
+> control from the stock engine image is also the better experiment: it changes exactly one
+> variable, the added package.
+
+> **In the dev topology the unit dropdown does not route execution.** `proxy.config.json`
+> pins `/wsapi` to `localhost:8085`, so every run reaches whichever computing unit is
+> reachable there regardless of the selection — which makes the control appear to pass. Run
+> this comparison under the full chart, where the frontend is served in-cluster and resolves
+> each unit by its own address. To check the two units differ without a workflow at all:
+>
+> ```bash
+> kubectl exec -n texera-workflow-computing-unit-pool <pod> -- python3 -c "import xgboost"
+> kubectl get pod <pod> -n texera-workflow-computing-unit-pool -o "jsonpath={.spec.containers[*].image}"
+> ```
 
 ---
 
@@ -143,15 +181,28 @@ That failure is the evidence.
 | Row stuck in `MIRRORING` | The Job was created but never reported. `kubectl get jobs -n texera-workflow-computing-unit-pool`, and check the manager's RBAC for `jobs`, `configmaps`, `pods/log`. |
 | `FAILED` with a push error | The registry ClusterIP is unreachable, or the runtime does not treat `10.96.0.99:5000` as insecure. |
 | `FAILED` instantly with an empty log | The skopeo image could not be pulled inside the cluster. |
-| Registry pod `Pending` | No StorageClass for its PVC — apply the local-path provisioner. |
+| Registry pod `Pending` | No default StorageClass for its PVC. minikube has one; a bare cluster may not. |
+| HTTP 400 on **Add** | The name contains a character the validator rejects. Letters, digits, spaces, dots, hyphens and underscores only — no parentheses. |
+| Create unit fails, `metrics.k8s.io ... Not Found` | `minikube addons enable metrics-server`. |
 | Admin page 404s in dev | `/api/cu-image` missing from `frontend/proxy.config.json`; restart the dev server after adding it. |
 
 ## What has and has not been verified
 
-Verified: the skopeo validation and digest commands, against real registries, in both the
-accept and reject directions. Backend compiles, and the unit tests cover reference
-normalisation, digest parsing and the failure description.
+**Verified end to end on a real cluster** (minikube, k8s 1.35, services run against it
+through `~/.kube/config`):
 
-Not verified: the Kubernetes Job that wraps those commands, the push into the in-cluster
-registry, and a computing unit actually booting from a mirrored image. Test 1 is the
-cheapest way to find out.
+- the mirror Job is created, runs skopeo, and reports back
+- validation accepts a Texera-derived image and rejects `alpine:latest` with the documented
+  message, *before* copying any layer
+- the digest is resolved and recorded
+- the push into the in-cluster registry succeeds over plain HTTP, and the image is really
+  there (`GET /v2/_catalog`)
+- the row reconciles `MIRRORING` -> `READY` / `FAILED` on its own, and the pod log is
+  surfaced through `/api/cu-image/{iid}/log`
+- a computing unit starts from the mirrored image -- `spec.containers[].image` is the
+  `10.96.0.99:5000/...` reference, the kubelet pulls it from the in-cluster registry, and the
+  unit reaches `Running` and executes a workflow
+
+**Not verified:** behaviour under the full Helm chart (the above was done with the services
+running outside the cluster), re-mirroring an existing image, and anything about retention or
+garbage collection of superseded tags.

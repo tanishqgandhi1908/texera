@@ -18,25 +18,29 @@
 #
 # The FROM line is the part that matters. A computing unit runs the image's own CMD,
 # which must be bin/computing-unit-master -- the Amber engine. Building on the Texera
-# computing-unit image inherits that, along with the Python worker and its deps.
-# An image that does not (say, python:3.12) starts and immediately dies, so Texera
-# rejects it before copying anything.
+# image is what makes validation accept this; an arbitrary image is rejected.
+#
+# WHAT MAKES THIS A TEST RATHER THAN A TAUTOLOGY:
+# The stock image already ships scikit-learn, torch and transformers, so adding
+# scikit-learn alone proves nothing -- the control workflow would succeed on the stock
+# image too. xgboost is genuinely absent, so a UDF importing it fails on the stock image
+# and works here. That difference is the evidence that image selection is load-bearing.
+#
+# scikit-learn is also pinned DOWN (1.5.2, against the stock 1.7.2) as a second signal:
+# the version the workflow prints tells you which image actually ran.
 FROM ghcr.io/apache/texera-workflow-execution-coordinator:latest
 
-# Install as root, then drop back. A computing unit that ran as root would be a
-# privilege escalation -- and right now the pod does not enforce this, the image does.
 USER root
 
-# The point of a custom image: packages the default one does not have. These go into
-# the engine's own interpreter, so a Python UDF can import them directly.
 RUN pip3 install --no-cache-dir \
+      "xgboost==2.1.1" \
       "scikit-learn==1.5.2" \
       "joblib==1.4.2"
 
-# Fail the build rather than the workflow. Without this an image missing a dependency
-# only reveals it when a user's UDF raises ImportError mid-run.
+# Fail the build here rather than surfacing an ImportError inside a workflow later.
 RUN python3 -c "\
-import sklearn, joblib, pyarrow, pandas, numpy; \
+import xgboost, sklearn, joblib, pyarrow, pandas, numpy; \
+print('xgboost', xgboost.__version__); \
 print('sklearn', sklearn.__version__); \
 print('joblib', joblib.__version__); \
 print('pandas', pandas.__version__, 'numpy', numpy.__version__)"

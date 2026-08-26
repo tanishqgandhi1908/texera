@@ -14,24 +14,28 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Paste into a "Python UDF" operator. Proves the computing unit is running the curated
-# image: sklearn is not in Texera's default image, so this fails there and works here.
+# Paste into a **Python UDF** (transform) operator. This one needs an upstream operator --
+# any source with at least one row will do, since the code ignores the input and emits its
+# own rows. Use udf_ml_source.py if you would rather have a single self-contained operator.
 #
-# Trains a tiny classifier and emits one row per prediction, so the result table itself
-# is the evidence -- not just an import that happened to succeed.
+# On the CURATED image -> five rows: xgboost 2.1.1, sklearn 1.5.2, predictions.
+# On the STOCK image   -> ModuleNotFoundError: No module named 'xgboost'
 from pytexera import *
+
+import xgboost
 import sklearn
-from sklearn.ensemble import RandomForestClassifier
 from sklearn.datasets import load_iris
+from xgboost import XGBClassifier
 
 
 class ProcessTupleOperator(UDFOperatorV2):
 
     @overrides
     def open(self):
-        # Fit once per worker rather than per tuple.
         data = load_iris()
-        self.model = RandomForestClassifier(n_estimators=10, random_state=0)
+        self.model = XGBClassifier(
+            n_estimators=10, max_depth=3, random_state=0, verbosity=0
+        )
         self.model.fit(data.data, data.target)
         self.target_names = data.target_names
         self.samples = data.data[:5]
@@ -39,10 +43,12 @@ class ProcessTupleOperator(UDFOperatorV2):
     @overrides
     def process_tuple(self, tuple_: Tuple, port: int) -> Iterator[Optional[TupleLike]]:
         for i, features in enumerate(self.samples):
-            predicted = self.model.predict([features])[0]
+            proba = self.model.predict_proba([features])[0]
+            predicted = int(proba.argmax())
             yield {
                 "sample": i,
+                "xgboost_version": xgboost.__version__,
                 "sklearn_version": sklearn.__version__,
                 "predicted_species": str(self.target_names[predicted]),
-                "confidence": float(self.model.predict_proba([features])[0][predicted]),
+                "confidence": float(proba[predicted]),
             }
