@@ -373,3 +373,116 @@ and nothing would ever reap it. Had to be removed by hand:
 
 A compensating delete on the failure path, or creating the pod only after the transaction
 commits, would prevent this.
+
+## 11. The branch's dataset path prefix is incompatible with the curated image (BLOCKS file scans)
+
+This is the most consequential finding of the second session, because it breaks the feature's
+own demo path in a way Test 1 cannot expose.
+
+The branch renamed the resource path prefix:
+
+    ResourceType (this branch):  Datasets = "datasets"   ->  /datasets/{owner}/{name}/{ver}/{file}
+    ResourceType (upstream main): Dataset  = "dataset"   ->  /dataset/{owner}/{name}/{ver}/{file}
+
+`ResourceType.fromPrefix` matches the string exactly (`values.find(_.toString == segment)`),
+so neither side accepts the other's form. Now note what the curated image is built from:
+
+    FROM ghcr.io/apache/texera-workflow-execution-coordinator:latest
+
+That is upstream `main`. So a computing unit started from a curated image runs UPSTREAM's
+FileResolver, while the host services run the BRANCH's. Any workflow with a file scan fails
+inside the unit:
+
+    LogicalPlan - Error resolving file path for ScanSourceOpDesc
+    org.apache.commons.vfs2.FileNotFoundException: Could not read from
+      "/datasets/texera/iris-species/v1/Iris.csv" because it is not a file.
+        at FileResolver$.$anonfun$resolve$6(FileResolver.scala:71)
+        at scala.Option.getOrElse(Option.scala:201)
+
+The message is badly misleading: all three resolvers failed and `getOrElse` surfaced the
+LOCAL resolver's complaint, so it names a path that was never meant to be local. Resolution
+failed; nothing was wrong with the file, LakeFS, the DB, or the network.
+
+Workaround used for the demo: store the singular form `/dataset/...` in the workflow, which
+the unit resolves. The host compiling service then cannot resolve it, so the UI may show a
+schema warning on the scan operator even though execution succeeds.
+
+Implication for the PR: **a curated image built FROM upstream cannot read datasets created by
+a deployment running this branch.** The README instructs building FROM the Texera image and
+the obvious base is upstream `latest`, so this is the default path into the bug. Either the
+curated image must be built from the same commit as the deployment, or the prefix rename needs
+a compatibility shim (accept both segments).
+
+## 12. Nothing makes host-side storage reachable from a computing-unit pod
+
+The README's low-memory topology (services in the IDE, cluster via ~/.kube/config) says
+nothing about how the POD reaches Postgres, LakeFS and MinIO on the developer's machine.
+Three separate things bite, in order:
+
+1. **`host.minikube.internal` does not resolve inside pods.** It is in the NODE's /etc/hosts
+   only. A node-level `nc -z host.minikube.internal 5432` succeeds, which makes the config
+   look correct, while the CU dies with `Connection refused` to Postgres. Use the host's WSL
+   interface IP instead (here `172.20.16.1`) -- reachable from the pod AND from Windows, so
+   one value serves both sides.
+
+2. **`pg_hba.conf` must admit the pod subnets** (added `172.16.0.0/12`, `192.168.65.0/24`,
+   `192.168.49.0/24`).
+
+3. **LakeFS signs download URLs with an endpoint the pod cannot reach.** The compose file
+   hardcodes `LAKEFS_BLOCKSTORE_S3_PRE_SIGNED_ENDPOINT=http://localhost:9000`, correct for a
+   browser on the host and useless inside a pod. No Texera env var fixes this -- it is LakeFS
+   configuration. Override it to the host IP.
+
+None of this arises under the full Helm chart, where everything is in-cluster. It only affects
+the topology the README actively recommends to people short on RAM.
+
+## 13. Re-registering the same Docker Hub link: storage dedupes, the download does not
+
+Measured directly. Registering `tagandhi19/texera-cu-sklearn:1.0` a second time under a new
+name produced a second row and repository:
+
+    /v2/_catalog -> {"repositories":["texera-cu/6","texera-cu/9"]}
+
+Registry storage for BOTH:
+
+    blobs/                        2.2 GB
+    repositories/texera-cu/       508 KB
+
+So `registry:2` deduplicates perfectly -- blobs are content-addressed, and the second
+repository added only manifests and links. But the mirror Job still pulled the full ~4.3 GB
+from Docker Hub again and took the same ~5 minutes, because nothing checks whether that digest
+is already mirrored. `create()` tests only the NAME for uniqueness; `source_ref` has no unique
+constraint and no digest lookup.
+
+Cheap improvement: before starting a Job, resolve the source digest and check whether an
+existing READY row already carries it; if so, the new row could point at the existing tag (or
+at least skip the copy). Today a duplicate registration is free in storage but full price in
+time and in transient disk.
+
+## 14. cu_image rows survive a cluster rebuild still marked READY
+
+Delete and recreate the cluster (or just the registry PVC) and every row still reads READY
+with an `image_tag` pointing at a registry that no longer holds it. Nothing reconciles the
+catalogue against the registry, so the next unit created from such a row sits in
+ImagePullBackOff with no indication that a re-mirror is needed. `refresh` fixes it, but only
+if you know to run it.
+
+## Environment quirks that cost time in session 2
+
+- **FileService exits if MinIO is not up yet.** It retries the dataset bucket 6 times and then
+  throws `RuntimeException: Failed to reach the texera dataset bucket after 6 attempts`. Start
+  the compose stack and wait for `/minio/health/live` BEFORE starting FileService.
+- **The compile API takes a different shape than stored workflow content.** Operator properties
+  must be FLATTENED (not nested under `operatorProperties`), and links use
+  `fromOpId` / `fromPortId` / `toOpId` / `toPortId` with the op ids as PLAIN STRINGS and ports
+  as `{id, internal}` ordinals. Sending the frontend's stored shape returns
+  `400 Unable to process JSON` with no hint which field is wrong.
+- **The shipped example workflow has a stale dataset path.** `[Demo] Iris classification with a
+  mounted PyTorch model.json` uses `/datasets/texera/iris-species/v1 - v1/Iris.csv`, but
+  `parsePrefixedPath` wants `/{prefix}/{owner}/{name}/{version}/{file}` -- so `v1`, not
+  `v1 - v1`.
+- **Docker's WSL disk only grows.** Freeing space inside it returns nothing to Windows, and
+  `diskpart compact vdisk` did not help. Deleting `docker_data.vhdx` reclaims it, but Docker
+  then crash-loops on orphaned sockets in `%LOCALAPPDATA%\Docker\run` and
+  `%LOCALAPPDATA%\docker-secrets-engine` that cannot be deleted, only RENAMED. Rename both
+  before restarting Docker. Prefer Docker Desktop's own "Clean / Purge data".

@@ -122,3 +122,101 @@ the in-cluster registry -> select on a unit -> pod boots from the mirrored image
 runs and returns rows. Both the accept and reject paths were confirmed, and a unit was
 observed Running with `spec.containers[].image = 10.96.0.99:5000/texera-cu/4:1`.
 The remaining problems are all environment/docs, not the feature.
+
+## TEARDOWN LESSON (learned the hard way on the 2026-08-26 restore)
+
+**Do NOT free space by deleting `docker_data.vhdx` while Docker Desktop is installed.**
+It reclaims the space, but Docker Desktop will not start afterwards — it crashes at
+startup on orphaned AF_UNIX socket files that Windows will not let you delete:
+
+    starting services: initializing Ingest server: listening on
+    unix://.../Docker/run/sailor-ingest.sock: remove ...: The file cannot be accessed
+    by the system.
+
+and then again on `.../docker-secrets-engine/engine.sock`. The files cannot be removed,
+only the containing directory can be renamed. Recovery that worked:
+
+1. kill `Docker Desktop`, `com.docker.backend`, `com.docker.build`
+2. `wsl --shutdown`, then `wsl --unregister docker-desktop`
+3. rename `%LOCALAPPDATA%\Docker\run` and `%LOCALAPPDATA%\docker-secrets-engine`
+   (rename, not delete — delete fails)
+4. start Docker Desktop; it rebuilds the distro and both directories
+
+**Next time use Docker Desktop -> Troubleshoot -> "Clean / Purge data" instead.** Same
+space reclaimed, no orphaned sockets, no manual recovery.
+
+## Restore of 2026-08-26 — what was actually needed
+
+Far less than a fresh setup, because the teardown kept the important state:
+
+- toolchain, IntelliJ, PostgreSQL: never removed, nothing to do
+- `texera_db` and `texera_iceberg_catalog`: survived intact, INCLUDING the pgroonga
+  TokenBigram fix and the `user_warehouse` + `whid` patch — both verified still present
+- `cu_image` rows survived (iid 1 alpine FAILED, iid 2 stock READY, iid 4 xgboost READY)
+  but their `image_tag` values point at a registry that no longer exists, so each needs a
+  re-mirror (Refresh) once the cluster is back
+- workflow wid 6 "XGBoost curated-image demo" survived
+- rebuilt: `yarn install` (~6 min), `sbt compile` (~6 min, 0 errors), Docker data disk,
+  minikube cluster
+
+## DISK RULES FOR THIS MACHINE (learned 2026-08-26, cost several hours)
+
+The drive is 63 GB with ~40 GB taken by Windows + toolchain, so the Docker VM has roughly
+15-18 GB to work in. Two rules make the difference between the demo fitting and not:
+
+### 1. This machine fits ONE computing unit, not two
+
+MEASURED 2026-08-27, correcting an earlier wrong assumption in this file:
+
+    minikube + k8s images                ~3.0 GB
+    registry, one curated image          ~1.5 GB
+    registry, both images                ~2.5 GB
+    FIRST CU image pulled onto the node  ~5.6 GB
+    SECOND CU image pulled onto the node ~1.3 GB and still climbing when the disk filled
+
+Total for two units is ~12.5-13 GB of Docker data. After removing Alteryx AND IntelliJ this
+drive offers ~16.5 GB, and because the Docker disk only grows (rule 2) there is no margin —
+two attempts at the second unit filled the disk and crashed minikube both times.
+
+**The earlier claim in this file that a second unit is "nearly free because it shares base
+layers" was WRONG.** That observation came from a case where the image was already present
+in the node's docker daemon from a local `docker build`. Pulling a *different* mirrored
+repository does not dedupe the same way in practice — the second pull cost over 1.3 GB
+before the disk ran out. Do not rely on layer sharing to make room.
+
+So: run ONE curated image and ONE unit. The live demo still shows register -> validate ->
+mirror -> unit boots from the mirrored image -> workflow produces xgboost results. The
+"control fails with ModuleNotFoundError" contrast cannot be shown live here; cite the
+recorded evidence in NOTES-curated-images-session.md, or run it on a bigger machine.
+
+### 2. Docker's virtual disk only ever grows
+
+`docker_data.vhdx` never shrinks. Deleting images, pruning, deleting pods — all free space
+*inside* the VM (so future pulls reuse it) but return nothing to Windows. `diskpart compact
+vdisk` did not help either. The only reliable reclaim is deleting the disk and letting
+Docker rebuild it.
+
+**Correct reclaim sequence** (the naive one leaves Docker crash-looping on orphaned
+sockets, see the earlier note):
+
+    1. stop java/kubectl/node + Docker Desktop processes
+    2. wsl --shutdown
+    3. wsl --unregister docker-desktop
+    4. delete %LOCALAPPDATA%\Docker\wsl\disk\docker_data.vhdx
+    5. RENAME (cannot delete) %LOCALAPPDATA%\Docker\run
+       and %LOCALAPPDATA%\docker-secrets-engine   <-- do this BEFORE restarting Docker
+    6. start Docker Desktop
+
+Doing step 5 up front made Docker start clean first try; skipping it cost two crash cycles.
+
+### Budget that fits
+
+    minikube base + k8s images      ~3 GB
+    registry with both images       ~2.2 GB  (they share a base, so this is not 2x)
+    node images, pulled in sequence ~3.7 GB
+    -------------------------------------------
+    total                           ~9 GB, so start with 12 GB+ free
+
+IntelliJ (~3.6 GB) was uninstalled to make room and is NOT needed — the services run as
+plain JVMs from exported classpaths. `winget install JetBrains.IntelliJIDEA.Community`
+brings it back in minutes if wanted.
