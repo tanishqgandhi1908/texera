@@ -139,7 +139,7 @@ Register it as `Python ML xgboost`, wait for `READY`, then:
    the layers are cached.
 3. Drop a **Python UDF Source** operator and paste `udf_ml_source.py`. (Use the source
    variant: a plain Python UDF is a transform and needs an upstream operator, so a workflow
-   containing only one is *Invalid*. `udf_ml_test.py` is the transform version if you would
+   containing only one is *Invalid*. `udf_ml_transform.py` is the transform version if you would
    rather wire up a source in front of it.)
 4. Run. Expected: five rows with `xgboost_version` `2.1.1`, `sklearn_version` `1.5.2`, a
    predicted iris species and a confidence each.

@@ -21,7 +21,7 @@
 # On the STOCK image   -> ModuleNotFoundError: No module named 'xgboost'
 #
 # That failure is the point: it is what proves the computing unit really started from the
-# selected image. See udf_ml_test.py for the transform variant.
+# selected image. See udf_ml_transform.py for the transform variant.
 from pytexera import *
 
 import xgboost
