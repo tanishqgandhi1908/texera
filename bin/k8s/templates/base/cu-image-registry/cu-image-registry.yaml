@@ -96,6 +96,9 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
+  {{- if .Values.cuImageRegistry.persistence.storageClass }}
+  storageClassName: {{ .Values.cuImageRegistry.persistence.storageClass }}
+  {{- end }}
   resources:
     requests:
       storage: {{ .Values.cuImageRegistry.persistence.size }}

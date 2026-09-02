@@ -37,7 +37,13 @@ spec:
       initContainers:
         - name: prepuller
           image: {{ .Values.texera.imageRegistry }}/{{ .Values.workflowComputingUnitPool.imageName }}:{{ .Values.texera.imageTag }}
-          imagePullPolicy: Always
+          # Follows texeraImages.pullPolicy like every other Texera image rather than
+          # forcing Always. Warming the node's cache only needs the image to be present,
+          # which IfNotPresent already guarantees -- while a hardcoded Always makes the
+          # chart undeployable whenever the image is not on a public registry: a locally
+          # built image, or one mirrored into a private one, can never satisfy it, and the
+          # prepuller then sits in ImagePullBackOff on every node.
+          imagePullPolicy: {{ .Values.texeraImages.pullPolicy }}
           command: ["sh", "-c", "true"]
       containers:
         - name: pause

@@ -334,6 +334,11 @@ cuImageRegistry:
   persistence:
     enabled: true
     size: 50Gi
+    # The same class postgres and minio ask for. Named rather than left to the cluster
+    # default, because a cluster can perfectly well provide local-path and no default at
+    # all -- in which case every other volume in this chart binds and only this one hangs
+    # Pending. Set it to "" to fall back to whatever the cluster's default is.
+    storageClass: local-path
 
 # headless service for the access of computing units
 workflowComputingUnitPool:
