@@ -120,7 +120,13 @@ class KubernetesClient(client: io.fabric8.kubernetes.client.KubernetesClient) {
       memoryLimit: String,
       gpuLimit: String,
       envVars: Map[String, Any],
-      shmSize: Option[String] = None
+      shmSize: Option[String] = None,
+      /**
+        * Curated image to run instead of the deployment default. Already resolved to a
+        * reference in the in-cluster registry by the caller, so nothing here has to know
+        * how curation works.
+        */
+      curatedImage: Option[String] = None
   ): Pod = {
     val podName = generatePodName(cuid)
     if (getPodByName(podName).isDefined) {
@@ -171,7 +177,7 @@ class KubernetesClient(client: io.fabric8.kubernetes.client.KubernetesClient) {
     val containerBuilder = specBuilder
       .addNewContainer()
       .withName("computing-unit-master")
-      .withImage(KubernetesConfig.computeUnitImageName)
+      .withImage(curatedImage.getOrElse(KubernetesConfig.computeUnitImageName))
       .withImagePullPolicy(KubernetesConfig.computingUnitImagePullPolicy)
       .addNewPort()
       .withContainerPort(KubernetesConfig.computeUnitPortNumber)

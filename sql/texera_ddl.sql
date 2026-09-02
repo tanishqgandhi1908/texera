@@ -252,6 +252,36 @@ CREATE TABLE IF NOT EXISTS workflow_computing_unit
     FOREIGN KEY (uid) REFERENCES "user"(uid) ON DELETE CASCADE
 );
 
+-- A computing-unit image an administrator has curated, which any user may then start a
+-- computing unit from. Global rather than owned: one trusted list is offered to everyone,
+-- so there is no uid and no per-user access table. created_by is for auditing only and
+-- does not restrict who may use the image.
+CREATE TABLE IF NOT EXISTS cu_image
+(
+    iid            SERIAL PRIMARY KEY,
+    name           VARCHAR(128) NOT NULL,
+    -- What the administrator supplied, normalised to an image reference.
+    source_ref     VARCHAR(512) NOT NULL,
+    -- The digest source_ref resolved to when last mirrored; an upstream tag can move.
+    source_digest  VARCHAR(128),
+    status         VARCHAR(16)  NOT NULL DEFAULT 'PENDING'
+        CONSTRAINT ck_cu_image_status
+            CHECK (status IN ('PENDING', 'MIRRORING', 'READY', 'FAILED')),
+    -- Where a unit pulls from: the in-cluster registry. Null until a mirror succeeds.
+    image_tag      VARCHAR(512),
+    -- Part of the tag, so a re-mirror publishes a new reference rather than mutating
+    -- one that running pods were started from.
+    mirror_number  INT          NOT NULL DEFAULT 0,
+    mirror_log     TEXT,
+    created_by     INT,
+    creation_time  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (created_by) REFERENCES "user" (uid) ON DELETE SET NULL,
+    UNIQUE (name)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cu_image_source_digest ON cu_image (source_digest);
+
 -- Per-user warehouse registrations (#6870): one row per warehouse a user registered.
 -- Base columns only; the assume-role (BYO-S3) columns come in a later change.
 CREATE TABLE IF NOT EXISTS user_warehouse
