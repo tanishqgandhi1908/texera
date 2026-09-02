@@ -30,6 +30,7 @@ import { ExposePropertyWrapperComponent } from "./expose-property-wrapper/expose
 import { FormlyRepeatDndComponent } from "./repeat-dnd/repeat-dnd.component";
 import { UiUdfParametersComponent } from "../../workspace/component/ui-udf-parameters/ui-udf-parameters.component";
 import { DatasetVersionSelectorComponent } from "../../workspace/component/dataset-version-selector/dataset-version-selector.component";
+import { ResourceValueSelectorComponent } from "../../workspace/component/resource-value-selector/resource-value-selector.component";
 import { HuggingFaceImageUploadComponent } from "../../workspace/component/hugging-face-image-upload/hugging-face-image-upload.component";
 import { HuggingFaceComponent } from "../../workspace/component/hugging-face/hugging-face.component";
 import { HuggingFaceAudioUploadComponent } from "../../workspace/component/hugging-face-audio-upload/hugging-face-audio-upload.component";
@@ -84,6 +85,7 @@ export const TEXERA_FORMLY_CONFIG = {
     { name: "codearea", component: CodeareaCustomTemplateComponent },
     { name: "inputautocomplete", component: DatasetFileSelectorComponent, wrappers: ["form-field"] },
     { name: "datasetversionselector", component: DatasetVersionSelectorComponent, wrappers: ["form-field"] },
+    { name: "resourcevalue", component: ResourceValueSelectorComponent },
     { name: "huggingface", component: HuggingFaceComponent, wrappers: ["form-field"] },
     { name: "huggingface-audio-upload", component: HuggingFaceAudioUploadComponent, wrappers: ["form-field"] },
     { name: "huggingface-image-upload", component: HuggingFaceImageUploadComponent, wrappers: ["form-field"] },

@@ -81,9 +81,25 @@ describe("ComputingUnitActionsService", () => {
         "4G",
         "1",
         "1G",
-        "64M"
+        "64M",
+        // No curated image on the request, so the deployment's default image is used.
+        undefined
       );
       expect(computingUnitService.createLocalComputingUnit).not.toHaveBeenCalled();
+    });
+
+    it("passes the curated image through when the request names one", () => {
+      service.create({ ...baseRequest, type: "kubernetes", iid: 4 });
+
+      expect(computingUnitService.createKubernetesBasedComputingUnit).toHaveBeenCalledWith(
+        "unit",
+        "2",
+        "4G",
+        "1",
+        "1G",
+        "64M",
+        4
+      );
     });
 
     it("routes a local request to createLocalComputingUnit with name and localUri", () => {

@@ -26,6 +26,8 @@ import { NzIconDirective } from "ng-zorro-antd/icon";
 import { NotificationService } from "../../../common/service/notification/notification.service";
 import { WorkflowActionService } from "../../service/workflow-graph/model/workflow-action.service";
 import {
+  DATASET_INPUT_TYPE,
+  MODEL_INPUT_TYPE,
   UiUdfParametersEditError,
   UiUdfParametersParseError,
 } from "../../service/code-editor/ui-udf-parameters-parser.service";
@@ -33,6 +35,14 @@ import { UiUdfParametersSyncService } from "../../service/code-editor/ui-udf-par
 import type { AttributeType } from "../../types/workflow-compiling.interface";
 
 type UiUdfParameterColumn = Readonly<{ label: string; key: string; parentKey?: string; disabled: boolean }>;
+
+const VALUE_COLUMN: UiUdfParameterColumn = { label: "Value", key: "value", disabled: false };
+
+// A row that names a resource is edited by that resource's browser rather than a text box.
+// A row without one keeps the default text editor, which is what an ordinary typed
+// parameter wants.
+const RESOURCE_VALUE_EDITOR = "resourcevalue";
+const RESOURCE_INPUT_TYPES: ReadonlySet<string> = new Set([MODEL_INPUT_TYPE, DATASET_INPUT_TYPE]);
 
 /** Renders inferred Python UDF UI parameters with editable values and locked name/type columns. */
 @Component({
@@ -53,7 +63,7 @@ export class UiUdfParametersComponent extends FieldArrayType<FormlyFieldConfig> 
   private readonly disabledStateConfigured = new WeakMap<FormlyFieldConfig, boolean>();
 
   readonly fieldColumns: UiUdfParameterColumn[] = [
-    { label: "Value", key: "value", disabled: false },
+    VALUE_COLUMN,
     { label: "Name", key: "attributeName", parentKey: "attribute", disabled: true },
     { label: "Type", key: "attributeType", parentKey: "attribute", disabled: true },
   ];
@@ -88,7 +98,35 @@ export class UiUdfParametersComponent extends FieldArrayType<FormlyFieldConfig> 
   override onPopulate(field: FormlyFieldConfig): void {
     this.configureRowTemplate(this.getFieldArrayTemplate(field));
     super.onPopulate(field);
-    field.fieldGroup?.forEach(rowField => this.configureRowFields(rowField));
+    // Row data comes from the array being populated rather than from rowField.model:
+    // Formly has not bound the row models yet at this point.
+    const rows = (this.model ?? []) as { inputType?: string }[];
+    field.fieldGroup?.forEach((rowField, index) => {
+      this.configureRowFields(rowField);
+      this.configureResourceEditor(rowField, rows[index]);
+    });
+  }
+
+  /**
+   * Swaps a resource row's value editor for that resource's browser.
+   *
+   * Left alone for a row that names nothing, so an ordinary typed parameter keeps the
+   * plain text box.
+   */
+  private configureResourceEditor(
+    rowField: FormlyFieldConfig | undefined,
+    row: { inputType?: string } | undefined
+  ): void {
+    if (!rowField) return;
+    const valueField = this.getColumnField(rowField, VALUE_COLUMN);
+    if (!valueField) return;
+
+    const inputType = row?.inputType ?? (rowField.model as { inputType?: string } | undefined)?.inputType;
+    if (!inputType || !RESOURCE_INPUT_TYPES.has(inputType)) return;
+
+    valueField.type = RESOURCE_VALUE_EDITOR;
+    // Which browser to open is the row's business, not the editor's.
+    valueField.props = { ...(valueField.props ?? {}), resource: inputType };
   }
 
   /** Finds the Formly field config that backs one visible column in a parameter row. */

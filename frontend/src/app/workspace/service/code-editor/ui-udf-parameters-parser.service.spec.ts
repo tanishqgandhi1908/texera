@@ -60,6 +60,36 @@ describe("UiUdfParametersParserService", () => {
     );
   });
 
+  // `value=Resource.X` marks where a parameter's value comes from: the panel offers that
+  // resource's browser instead of a text box. The parameter is still an ordinary string.
+  it("should parse the resource a value=Resource.X argument names", () => {
+    expectParsed(
+      service,
+      `
+        self.UiParameter("IRIS_MODEL", AttributeType.STRING, value=Resource.MODEL)
+        self.UiParameter("TRAIN_DATA", AttributeType.STRING, value=Resource.DATASET)
+      `,
+      [
+        { attribute: { attributeName: "IRIS_MODEL", attributeType: "string" }, value: "", inputType: "model" },
+        { attribute: { attributeName: "TRAIN_DATA", attributeType: "string" }, value: "", inputType: "dataset" },
+      ]
+    );
+  });
+
+  // Omitted rather than empty, so a row naming nothing is indistinguishable from one
+  // declared before resources existed.
+  it("should omit inputType for a plain parameter", () => {
+    expectParsed(service, 'self.UiParameter("count", AttributeType.INT)', [parameter("count", "integer")]);
+  });
+
+  it("should ignore a declaration whose value is not a known Resource", () => {
+    // Same treatment as an unrecognised AttributeType: no row at all, rather than a row
+    // the panel has no editor for.
+    expectParsed(service, 'self.UiParameter("m", AttributeType.STRING, value=Resource.NOPE)', []);
+    expectParsed(service, 'self.UiParameter("m", AttributeType.STRING, value="model")', []);
+    expectParsed(service, 'self.UiParameter("m", AttributeType.STRING, value=Other.MODEL)', []);
+  });
+
   it("should parse multiline UiParameter calls with split arguments", () => {
     expectParsed(
       service,
