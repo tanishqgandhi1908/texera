@@ -34,6 +34,7 @@ import org.apache.texera.dao.jooq.generated.enums.PrivilegeEnum
 import org.apache.texera.dao.jooq.generated.tables.Model.MODEL
 import org.apache.texera.dao.jooq.generated.tables.ModelVersion.MODEL_VERSION
 import org.apache.texera.dao.jooq.generated.tables.User.USER
+import org.apache.texera.dao.jooq.generated.tables.VirtualEnvironments.VIRTUAL_ENVIRONMENTS
 import org.apache.texera.dao.jooq.generated.tables.daos.{ModelDao, ModelUserAccessDao}
 import org.apache.texera.dao.jooq.generated.tables.pojos.{Model, ModelUserAccess, ModelVersion}
 import org.apache.texera.service.`type`.{Diff, ExistingUploadFilesRequest, LakeFSFileNode}
@@ -102,6 +103,31 @@ object ModelResource {
 
   private val MULTIPART_OPERATIONS = Seq("list", "init", "finish", "abort")
 
+  /**
+    * Rejects an environment the user does not own.
+    *
+    * `virtual_environments` rows are per-user, and the foreign key alone would happily
+    * accept somebody else's `veid`. Checking ownership keeps a model from naming an
+    * environment its owner can neither see nor install, and keeps the column from being
+    * used to probe which environment ids exist.
+    *
+    * @throws jakarta.ws.rs.BadRequestException if the id names no environment of the user's
+    */
+  private def validateEnvironmentOwnership(ctx: DSLContext, uid: Integer, veid: Integer): Unit = {
+    if (veid == null) return
+    val owned = ctx.fetchExists(
+      ctx
+        .selectFrom(VIRTUAL_ENVIRONMENTS)
+        .where(VIRTUAL_ENVIRONMENTS.VEID.eq(veid))
+        .and(VIRTUAL_ENVIRONMENTS.UID.eq(uid))
+    )
+    if (!owned) {
+      throw new BadRequestException(
+        s"Unknown Python environment '$veid'. Choose one of your own environments, or none at all."
+      )
+    }
+  }
+
   private def context =
     SqlServer
       .getInstance()
@@ -163,7 +189,9 @@ object ModelResource {
       isModelPublic: Boolean,
       isModelDownloadable: Boolean,
       framework: String,
-      format: String
+      format: String,
+      /** Environment to load the model in, from those the creator already has. Null skips. */
+      veid: Integer = null
   )
 
   case class ModelDescriptionModification(mid: Integer, description: String)
@@ -173,6 +201,8 @@ object ModelResource {
   case class ModelFrameworkModification(mid: Integer, framework: String)
 
   case class ModelFormatModification(mid: Integer, format: String)
+
+  case class ModelEnvironmentModification(mid: Integer, veid: Integer)
 
   case class DashboardModelVersion(
       modelVersion: ModelVersion,
@@ -253,6 +283,11 @@ class ModelResource extends LazyLogging {
 
       model.setFramework(framework)
       model.setFormat(format.orNull)
+
+      // Optional: no chosen environment leaves the model loading on the engine's default
+      // libraries, exactly as before this existed.
+      validateEnvironmentOwnership(ctx, uid, request.veid)
+      model.setVeid(request.veid)
 
       // insert record and get created model with mid
       val createdModel = ResourceNaming.failOnDuplicateName(MODEL_RESOURCE.label) {
@@ -378,6 +413,38 @@ class ModelResource extends LazyLogging {
         normalizeLabel("framework", modificator.framework, SUPPORTED_FRAMEWORKS)
           .getOrElse(DEFAULT_FRAMEWORK)
       )
+      modelDao.update(model)
+      Response.ok().build()
+    }
+  }
+
+  /**
+    * Points the model at one of the caller's Python environments, or at none.
+    *
+    * Ownership is checked against the caller rather than the model's owner: a collaborator
+    * with write access can only offer an environment they themselves have, which is the
+    * only kind they could install anyway.
+    */
+  @POST
+  @Consumes(Array(MediaType.APPLICATION_JSON))
+  @Produces(Array(MediaType.APPLICATION_JSON))
+  @RolesAllowed(Array("REGULAR", "ADMIN"))
+  @Path("/update/environment")
+  def updateModelEnvironment(
+      modificator: ModelEnvironmentModification,
+      @Auth sessionUser: SessionUser
+  ): Response = {
+    withTransaction(context) { ctx =>
+      val uid = sessionUser.getUid
+      val modelDao = new ModelDao(ctx.configuration())
+      val model = getModelByID(ctx, modificator.mid)
+      if (!userHasWriteAccess(ctx, modificator.mid, uid)) {
+        throw new ForbiddenException(ERR_USER_HAS_NO_ACCESS_TO_MODEL_MESSAGE)
+      }
+
+      validateEnvironmentOwnership(ctx, uid, modificator.veid)
+
+      model.setVeid(modificator.veid)
       modelDao.update(model)
       Response.ok().build()
     }

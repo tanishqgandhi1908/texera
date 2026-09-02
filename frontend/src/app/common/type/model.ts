@@ -30,6 +30,12 @@ export interface Model {
   creationTime: number | undefined;
   coverImage: string | undefined;
   framework: string | undefined;
+  /**
+   * The Python environment the model should be loaded in, chosen by its owner from the
+   * environments they already have. Absent means the choice was skipped, and a UDF
+   * loading the model runs on the engine's default libraries.
+   */
+  veid?: number | undefined;
   format: string | undefined;
 }
 

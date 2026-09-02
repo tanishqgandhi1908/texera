@@ -116,6 +116,17 @@ The pod name prefix is in that list because the mounter reads a computing unit's
 out of its pod name. `bin/k8s/tests/test_helm_values.sh` guards the chart half against
 drifting away from what the templates read.
 
+## Which Python environment the model loads in
+
+Many machine learning libraries only load what they wrote themselves — a scikit-learn 1.5
+pickle is not reliably readable by 1.7 — so a model may name one of its owner's saved
+Python environments. Picking such a model in the property panel surfaces a hint when the
+selected computing unit does not have that environment installed, which is exactly the
+case where the UDF would fail at load time or quietly load something different.
+
+A model that names no environment was deliberately left on the engine's default libraries
+and produces no hint.
+
 ## Limits
 
 - **Kubernetes only.** A local computing unit is a JVM process with no node mounter, so

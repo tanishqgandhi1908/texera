@@ -456,7 +456,15 @@ CREATE TABLE IF NOT EXISTS model
     cover_image     varchar(255),
     framework       VARCHAR(32),
     format          VARCHAR(32),
+    -- The Python environment the model should be loaded in, chosen by its owner from the
+    -- environments they already have. NULL means the choice was skipped, and a UDF loading
+    -- the model runs on the engine's default libraries.
+    veid            INT,
     FOREIGN KEY (owner_uid) REFERENCES "user"(uid) ON DELETE CASCADE,
+    -- SET NULL: deleting the environment drops the model back to the default libraries
+    -- rather than deleting the model or blocking the delete.
+    CONSTRAINT model_veid_fkey FOREIGN KEY (veid)
+        REFERENCES virtual_environments (veid) ON DELETE SET NULL,
     UNIQUE (owner_uid, name)
     );
 
