@@ -1,0 +1,102 @@
+/**
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
+
+.section-title {
+  margin-bottom: 16px;
+}
+
+.page-title {
+  margin: 0;
+}
+
+.help-text {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+nz-card {
+  margin-bottom: 16px;
+}
+
+// The link field is the long one, so it takes the slack while the name stays compact.
+.add-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.add-field {
+  display: flex;
+  flex-direction: column;
+  min-width: 200px;
+}
+
+.add-field-wide {
+  flex: 1;
+  min-width: 320px;
+}
+
+.field-label {
+  font-weight: 500;
+  margin-bottom: 4px;
+}
+
+.field-hint {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.ref {
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.digest {
+  color: rgba(0, 0, 0, 0.45);
+  font-size: 11px;
+  margin-top: 2px;
+  word-break: break-all;
+}
+
+.muted {
+  color: rgba(0, 0, 0, 0.25);
+}
+
+.actions {
+  white-space: nowrap;
+}
+
+// A mirror log is the only place a rejection is explained, so it gets room to be read
+// and scrolls rather than stretching the dialog.
+.log {
+  background: #1e1e1e;
+  color: #e6e6e6;
+  padding: 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 60vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}

@@ -46,6 +46,7 @@ import { HubSearchResultComponent } from "./hub/component/hub-search-result/hub-
 import { EntityType } from "./hub/service/hub.service";
 import { AdminSettingsComponent } from "./dashboard/component/admin/settings/admin-settings.component";
 import { OrcidCallbackComponent } from "./hub/component/login/orcid-callback.component";
+import { AdminCuImageComponent } from "./dashboard/component/admin/cu-image/admin-cu-image.component";
 
 const routes: Routes = [];
 
@@ -195,6 +196,10 @@ routes.push({
         {
           path: "execution",
           component: AdminExecutionComponent,
+        },
+        {
+          path: "cu-image",
+          component: AdminCuImageComponent,
         },
         {
           path: "settings",

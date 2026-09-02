@@ -180,10 +180,37 @@ describe("ComputingUnitCreateModalComponent", () => {
       "4Gi",
       "0",
       "2G",
-      "128Mi"
+      "128Mi",
+      // No image chosen, so the deployment's default is used.
+      undefined
     );
     expect(mockNotificationService.success).toHaveBeenCalledWith("Successfully created the new compute unit");
     expect(unitCreatedSpy).toHaveBeenCalledWith(createdUnit);
+  });
+
+  it("starts the unit from the curated image the user picked", () => {
+    fixture.detectChanges();
+    component.selectedComputingUnitType = "kubernetes";
+    component.newComputingUnitName = "Curated Unit";
+    component.selectedCpu = "2";
+    component.selectedMemory = "4Gi";
+    component.selectedGpu = "0";
+    component.selectedJvmMemorySize = "2G";
+    component.shmSizeValue = 128;
+    component.shmSizeUnit = "Mi";
+    component.selectedIid = 7;
+
+    component.startComputingUnit();
+
+    expect(mockComputingUnitService.createKubernetesBasedComputingUnit).toHaveBeenCalledWith(
+      "Curated Unit",
+      "2",
+      "4Gi",
+      "0",
+      "2G",
+      "128Mi",
+      7
+    );
   });
 
   it("closes without creating on Cancel", () => {

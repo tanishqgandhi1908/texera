@@ -33,6 +33,7 @@ import { NzSliderComponent } from "ng-zorro-antd/slider";
 import { NzAlertComponent } from "ng-zorro-antd/alert";
 import { WorkflowComputingUnitManagingService } from "../../service/computing-unit/workflow-computing-unit/workflow-computing-unit-managing.service";
 import { ComputingUnitActionsService } from "../../service/computing-unit/computing-unit-actions/computing-unit-actions.service";
+import { CuImage, CuImageService, isStartable } from "../../../dashboard/service/admin/cu-image/cu-image.service";
 import { NotificationService } from "../../service/notification/notification.service";
 import { DashboardWorkflowComputingUnit, WorkflowComputingUnitType } from "../../type/workflow-computing-unit";
 import { extractErrorMessage } from "../../util/error";
@@ -103,6 +104,12 @@ export class ComputingUnitCreateModalComponent implements OnInit, OnChanges {
   availableComputingUnitTypes: WorkflowComputingUnitType[] = [];
   localComputingUnitUri: string = ""; // URI for local computing unit
 
+  // Images a unit can be started from. Only READY ones appear: an image still mirroring
+  // has nothing to pull, and a failed one never will.
+  startableImages: CuImage[] = [];
+  selectedIid?: number;
+  imagesUnavailable = false;
+
   // JVM memory slider configuration
   jvmMemorySliderValue: number = 1; // Initial value in GB
   jvmMemoryMarks: { [key: number]: string } = { 1: "1G" };
@@ -122,11 +129,31 @@ export class ComputingUnitCreateModalComponent implements OnInit, OnChanges {
   constructor(
     private computingUnitService: WorkflowComputingUnitManagingService,
     private notificationService: NotificationService,
-    private computingUnitActionsService: ComputingUnitActionsService
+    private computingUnitActionsService: ComputingUnitActionsService,
+    private cuImageService: CuImageService
   ) {}
+
+  private loadImages(): void {
+    this.cuImageService
+      .list()
+      .pipe(untilDestroyed(this))
+      .subscribe({
+        next: images => {
+          this.startableImages = images.filter(isStartable);
+          this.imagesUnavailable = false;
+        },
+        error: () => {
+          // Curated images may be disabled on this deployment, which must not stand in
+          // the way of creating an ordinary unit on the default image.
+          this.startableImages = [];
+          this.imagesUnavailable = true;
+        },
+      });
+  }
 
   ngOnInit(): void {
     // Fetch available computing unit types
+    this.loadImages();
     this.localComputingUnitUri = buildLocalComputingUnitUri(window.location);
     this.newComputingUnitName = "My Computing Unit";
     this.computingUnitService
@@ -262,6 +289,7 @@ export class ComputingUnitCreateModalComponent implements OnInit, OnChanges {
       jvmMemorySize: this.selectedJvmMemorySize,
       shmSize: `${this.shmSizeValue}${this.shmSizeUnit}`,
       localUri: this.localComputingUnitUri,
+      iid: this.selectedIid,
     };
 
     this.computingUnitActionsService

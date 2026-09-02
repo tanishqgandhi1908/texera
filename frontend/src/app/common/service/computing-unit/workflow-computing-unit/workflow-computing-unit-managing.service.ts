@@ -84,9 +84,22 @@ export class WorkflowComputingUnitManagingService {
     jvmMemorySize: string,
     shmSize: string,
     uri: string,
-    unitType: "kubernetes" | "local"
+    unitType: "kubernetes" | "local",
+    iid?: number
   ): Observable<DashboardWorkflowComputingUnit> {
-    const body = { name, cpuLimit, memoryLimit, gpuLimit, jvmMemorySize, shmSize, uri, unitType };
+    // iid is omitted rather than sent as null when no image was chosen, so the backend
+    // sees an absent option and falls back to the deployment's default image.
+    const body = {
+      name,
+      cpuLimit,
+      memoryLimit,
+      gpuLimit,
+      jvmMemorySize,
+      shmSize,
+      uri,
+      unitType,
+      ...(iid !== undefined ? { iid } : {}),
+    };
 
     return this.http
       .post<DashboardWorkflowComputingUnit>(`${AppSettings.getApiEndpoint()}/${COMPUTING_UNIT_CREATE_URL}`, body)
@@ -110,9 +123,20 @@ export class WorkflowComputingUnitManagingService {
     memoryLimit: string,
     gpuLimit: string,
     jvmMemorySize: string,
-    shmSize: string
+    shmSize: string,
+    iid?: number
   ): Observable<DashboardWorkflowComputingUnit> {
-    return this.createComputingUnit(name, cpuLimit, memoryLimit, gpuLimit, jvmMemorySize, shmSize, "", "kubernetes");
+    return this.createComputingUnit(
+      name,
+      cpuLimit,
+      memoryLimit,
+      gpuLimit,
+      jvmMemorySize,
+      shmSize,
+      "",
+      "kubernetes",
+      iid
+    );
   }
 
   /**
