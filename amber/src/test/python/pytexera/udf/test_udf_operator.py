@@ -22,7 +22,7 @@ import pandas
 import pytest
 import pytexera.udf.udf_operator as udf_operator
 
-from pytexera import AttributeType, Tuple, TupleLike, UDFOperatorV2
+from pytexera import AttributeType, Resource, Tuple, TupleLike, UDFOperatorV2
 from pytexera import UDFBatchOperator, UDFSourceOperator, UDFTableOperator
 from pytexera.udf.udf_operator import _UiParameterSupport
 
@@ -349,11 +349,43 @@ class TestUiParameterSupport:
         with pytest.raises(TypeError, match="provided multiple times"):
             operator.UiParameter("count", AttributeType.INT, type=AttributeType.INT)
         with pytest.raises(TypeError, match="unexpected keyword argument"):
-            operator.UiParameter("count", AttributeType.INT, value="1")
+            operator.UiParameter("count", AttributeType.INT, unknown="1")
         with pytest.raises(TypeError, match="UiParameter.type is required"):
             operator.UiParameter("count")
         with pytest.raises(TypeError, match="must be an AttributeType"):
             operator.UiParameter("count", object())
+
+    # `value=` now names the resource a parameter is filled from, so it is no longer an
+    # unexpected keyword -- but it only accepts a Resource.
+    def test_ui_parameter_resource_must_be_a_resource(self):
+        operator = MissingParameterOperator()
+
+        with pytest.raises(TypeError, match="must be a Resource"):
+            operator.UiParameter("model", AttributeType.STRING, value="model")
+        with pytest.raises(TypeError, match="must be a Resource"):
+            operator.UiParameter("model", AttributeType.STRING, value=object())
+
+    # A resource is named by its path, so the parameter has to be a string; any other
+    # type would fail parsing the path it is handed, which is worth saying up front.
+    def test_ui_parameter_resource_requires_string_type(self):
+        operator = MissingParameterOperator()
+
+        with pytest.raises(TypeError, match="must be AttributeType.STRING"):
+            operator.UiParameter("model", AttributeType.INT, value=Resource.MODEL)
+
+    def test_ui_parameter_records_the_resource_it_names(self):
+        operator = MissingParameterOperator()
+
+        model = operator.UiParameter("model", AttributeType.STRING, value=Resource.MODEL)
+        dataset = operator.UiParameter(
+            "dataset", AttributeType.STRING, value=Resource.DATASET
+        )
+        plain = operator.UiParameter("plain", AttributeType.STRING)
+
+        assert model.resource is Resource.MODEL
+        assert dataset.resource is Resource.DATASET
+        # A parameter that names nothing keeps the free-text default.
+        assert plain.resource is None
 
     def test_super_open_applies_injected_values_once(self):
         operator = SuperOpenParameterOperator()

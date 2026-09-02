@@ -446,11 +446,15 @@ class RegionExecutionManager(
         operators
           .flatMap(physicalOp => {
             val workerConfigs = resourceConfig.operatorConfigs(physicalOp.id).workerConfigs
+            // Forced once per operator, not once per worker: an operator that deferred
+            // part of its setup (a Python UDF naming resources) does a database round
+            // trip per resource the first time this is asked for.
+            val opExecInitInfo = physicalOp.executableOpExecInitInfo
             workerConfigs.map(_.workerId).map { workerId =>
               asyncRPCClient.workerInterface.initializeExecutor(
                 InitializeExecutorRequest(
                   workerConfigs.length,
-                  physicalOp.opExecInitInfo,
+                  opExecInitInfo,
                   physicalOp.isSourceOperator,
                   loopStartPortUris
                 ),

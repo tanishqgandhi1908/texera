@@ -29,6 +29,7 @@ from .udf.udf_operator import (
     UDFTableOperator,
     UDFBatchOperator,
     UDFSourceOperator,
+    Resource,
 )
 from core.models.type.large_binary import largebinary
 from core.models.schema.attribute_type import AttributeType
@@ -60,4 +61,5 @@ __all__ = [
     "Dict",
     "Any",
     "AttributeType",
+    "Resource",
 ]

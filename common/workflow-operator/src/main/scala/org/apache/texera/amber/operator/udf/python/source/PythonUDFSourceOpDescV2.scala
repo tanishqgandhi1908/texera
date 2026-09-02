@@ -104,6 +104,10 @@ class PythonUDFSourceOpDescV2 extends SourceOperatorDescriptor with PythonUdfUiP
       )
       .withLocationPreference(Option.empty)
       .withPveName(pveName)
+      // A resource parameter is left naming its version in the compiled code and bound to
+      // a mount path only when the execution starts, so editing a workflow never pays to
+      // resolve one. None when this UDF names no resources.
+      .withExecutionTimeBinding(uiParameterExecutionBinding(code))
 
     if (workers > 1) {
       physicalOp
