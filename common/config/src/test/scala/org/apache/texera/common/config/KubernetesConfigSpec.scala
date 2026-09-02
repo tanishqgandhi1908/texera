@@ -48,14 +48,39 @@ class KubernetesConfigSpec extends AnyFlatSpec with Matchers {
     ifUnset("KUBERNETES_COMPUTE_UNIT_POOL_NAMESPACE")(
       KubernetesConfig.computeUnitPoolNamespace shouldBe "texera-workflow-computing-unit-pool"
     )
+    // The project's own published image, which is also what the helm chart sets. The
+    // previous default named a personal Docker Hub repository that is private or gone, so
+    // any deployment not overriding this got pods stuck in ImagePullBackOff.
     ifUnset("KUBERNETES_IMAGE_NAME")(
-      KubernetesConfig.computeUnitImageName shouldBe "bobbai/texera-workflow-computing-unit:dev"
+      KubernetesConfig.computeUnitImageName shouldBe
+        "ghcr.io/apache/texera-workflow-execution-coordinator:latest"
     )
     ifUnset("KUBERNETES_IMAGE_PULL_POLICY")(
       KubernetesConfig.computingUnitImagePullPolicy shouldBe "Always"
     )
     ifUnset("KUBERNETES_COMPUTING_UNIT_GPU_RESOURCE_KEY")(
       KubernetesConfig.gpuResourceKey shouldBe "nvidia.com/gpu"
+    )
+    // Read back out of a CU's pod name by the mounter, so both sides must agree.
+    ifUnset("KUBERNETES_COMPUTE_UNIT_POD_NAME_PREFIX")(
+      KubernetesConfig.computeUnitPodNamePrefix shouldBe "computing-unit"
+    )
+    ifUnset("KUBERNETES_MOUNTER_HOST_ROOT")(
+      KubernetesConfig.mounterHostRoot shouldBe "/var/lib/texera-mounts"
+    )
+  }
+
+  "KubernetesConfig mounter and security settings" should "resolve to their defaults" in {
+    ifUnset("KUBERNETES_MOUNTER_PORT")(KubernetesConfig.mounterPort shouldBe 8100)
+    // A computing unit runs user code, and with a curated image the image itself is
+    // supplied rather than reviewed, so non-root is the default rather than opt-in.
+    ifUnset("KUBERNETES_COMPUTING_UNIT_RUN_AS_NON_ROOT")(
+      KubernetesConfig.computingUnitRunAsNonRoot shouldBe true
+    )
+    // The uid the Texera computing-unit image creates. It must exist in the image, which
+    // is why runAsNonRoot alone will not do -- kubelet cannot verify a named USER.
+    ifUnset("KUBERNETES_COMPUTING_UNIT_RUN_AS_USER")(
+      KubernetesConfig.computingUnitRunAsUser shouldBe 1001L
     )
   }
 
