@@ -232,6 +232,76 @@ object ImageMirrorClient extends LazyLogging {
       .map(_.drop(DigestMarker.length).trim)
       .filter(_.nonEmpty)
 
+  /**
+    * Whether the registry still holds a mirrored reference: Some(true)/Some(false) when it
+    * answered, None when it could not be asked.
+    *
+    * Worth asking because the catalogue and the registry can disagree. Delete and recreate
+    * the cluster -- or just the registry's volume -- and every row still reads READY with an
+    * image_tag pointing at something no longer there. A unit started from such a row sits in
+    * ImagePullBackOff, which says nothing about the real problem or its fix (re-mirror).
+    *
+    * Unreachable is deliberately NOT treated as absent. The registry is reachable at a
+    * ClusterIP, which a manager running outside the cluster cannot resolve, so answering
+    * "absent" there would block every start on a topology where the check simply cannot
+    * run. Being unable to check is not evidence of anything.
+    */
+  def registryHasImage(imageTag: String): Option[Boolean] = {
+    val parsed = splitImageReference(imageTag)
+    if (parsed.isEmpty) return None
+    val (registry, repository, tag) = parsed.get
+
+    try {
+      val url = new java.net.URI(s"http://$registry/v2/$repository/manifests/$tag").toURL
+      val connection = url.openConnection().asInstanceOf[java.net.HttpURLConnection]
+      try {
+        connection.setRequestMethod("HEAD")
+        connection.setConnectTimeout(RegistryProbeTimeoutMs)
+        connection.setReadTimeout(RegistryProbeTimeoutMs)
+        // Without this the registry answers 404 for a manifest it does have, because the
+        // default Accept does not include the schema the manifest is stored in.
+        connection.setRequestProperty(
+          "Accept",
+          "application/vnd.docker.distribution.manifest.v2+json," +
+            "application/vnd.oci.image.manifest.v1+json," +
+            "application/vnd.docker.distribution.manifest.list.v2+json," +
+            "application/vnd.oci.image.index.v1+json"
+        )
+        val status = connection.getResponseCode
+        if (status == 404) Some(false)
+        else if (status >= 200 && status < 400) Some(true)
+        else None
+      } finally connection.disconnect()
+    } catch {
+      case e: Throwable =>
+        logger.debug(s"Could not ask the registry about $imageTag: ${e.getMessage}")
+        None
+    }
+  }
+
+  private val RegistryProbeTimeoutMs = 3000
+
+  /**
+    * Splits "<registry>/<repository>:<tag>" into its three parts.
+    *
+    * The tag is taken from the LAST colon, because the registry address carries one of its
+    * own for the port -- looking for the first would read ":5000/texera-cu/2" as the tag.
+    * None for anything that is not a registry-qualified, tagged reference, which is all
+    * this ever has to handle: these references are produced by imageTagFor.
+    */
+  private[service] def splitImageReference(imageTag: String): Option[(String, String, String)] = {
+    val reference = Option(imageTag).map(_.trim).getOrElse("")
+    val separator = reference.lastIndexOf(':')
+    if (separator <= 0 || separator == reference.length - 1) return None
+    val (withoutTag, tag) = (reference.substring(0, separator), reference.substring(separator + 1))
+    val slash = withoutTag.indexOf('/')
+    if (slash <= 0 || slash == withoutTag.length - 1) return None
+    // A tag cannot contain a slash; if one appears after the colon the reference is not
+    // tagged at all and the "tag" is really part of the repository path.
+    if (tag.contains('/')) return None
+    Some((withoutTag.substring(0, slash), withoutTag.substring(slash + 1), tag))
+  }
+
   /** Removes one mirror's job. Safe to call when it does not exist. */
   def deleteMirror(iid: Int, mirrorNumber: Int): Unit = {
     val jobName = CuratedImageConfig.mirrorJobName(iid, mirrorNumber)

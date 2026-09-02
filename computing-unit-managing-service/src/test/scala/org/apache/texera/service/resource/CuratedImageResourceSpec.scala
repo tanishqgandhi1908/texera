@@ -102,6 +102,36 @@ class CuratedImageResourceSpec extends AnyFlatSpec with Matchers {
     normaliseRef("texera/img@sha256:abc123") shouldBe "texera/img@sha256:abc123"
   }
 
+  // Guards the same trap normaliseRef guards: the registry address carries a colon for its
+  // port, so the tag has to come from the LAST one.
+  "splitImageReference" should "split a mirrored reference into registry, repository and tag" in {
+    ImageMirrorClient.splitImageReference("10.96.0.99:5000/texera-cu/2:1") shouldBe
+      Some(("10.96.0.99:5000", "texera-cu/2", "1"))
+    ImageMirrorClient.splitImageReference("registry.example.com/team/img:v1.2") shouldBe
+      Some(("registry.example.com", "team/img", "v1.2"))
+  }
+
+  it should "refuse anything that is not a registry-qualified, tagged reference" in {
+    ImageMirrorClient.splitImageReference("") shouldBe None
+    ImageMirrorClient.splitImageReference(null) shouldBe None
+    // no tag
+    ImageMirrorClient.splitImageReference("10.96.0.99:5000/texera-cu/2") shouldBe None
+    // no registry
+    ImageMirrorClient.splitImageReference("texera-cu:1") shouldBe None
+    // trailing colon, and trailing slash
+    ImageMirrorClient.splitImageReference("10.96.0.99:5000/texera-cu/2:") shouldBe None
+    ImageMirrorClient.splitImageReference("10.96.0.99:5000/:1") shouldBe None
+  }
+
+  // Unreachable must never read as absent: the registry lives at a ClusterIP, which a
+  // manager running outside the cluster cannot resolve, and answering "absent" there would
+  // block every start on a topology where the check simply cannot run.
+  "registryHasImage" should "be undecided rather than negative when it cannot ask" in {
+    ImageMirrorClient.registryHasImage("not-a-reference") shouldBe None
+    // A port nothing listens on: a connection error, not a 404.
+    ImageMirrorClient.registryHasImage("127.0.0.1:1/texera-cu/1:1") shouldBe None
+  }
+
   "sourceDigestFrom" should "read the digest a finished mirror printed" in {
     val log =
       """Inspecting texera/cu-alphafold3:1.0

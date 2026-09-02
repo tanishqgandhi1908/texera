@@ -35,7 +35,7 @@ import org.jooq.{DSLContext, Record}
 import java.sql.Timestamp
 import scala.jdk.CollectionConverters._
 
-object CuratedImageResource {
+object CuratedImageResource extends LazyLogging {
 
   private def context: DSLContext = SqlServer.getInstance().createDSLContext()
 
@@ -143,8 +143,42 @@ object CuratedImageResource {
       context.select(STATUS, IMAGE_TAG).from(CU_IMAGE).where(IID.eq(iid)).fetchOne()
     )
     record.flatMap { r =>
-      if (r.get(STATUS) == Status.Ready) Option(r.get(IMAGE_TAG)) else None
+      if (r.get(STATUS) != Status.Ready) None
+      else {
+        val imageTag = Option(r.get(IMAGE_TAG))
+        // A row can outlive the copy it points at: rebuilding the cluster, or just the
+        // registry's volume, leaves it READY with a tag the registry no longer has. Left
+        // alone, the unit is created and then sits in ImagePullBackOff, which names
+        // neither the cause nor the fix. Only a definite "not there" counts -- see
+        // registryHasImage on why unreachable must not.
+        imageTag.filter { tag =>
+          if (ImageMirrorClient.registryHasImage(tag).contains(false)) {
+            markMissingFromRegistry(iid, tag)
+            false
+          } else true
+        }
+      }
     }
+  }
+
+  /**
+    * Records that a READY row's image is gone from the registry, so the catalogue stops
+    * claiming it can be started and the admin UI shows why.
+    */
+  private def markMissingFromRegistry(iid: Int, imageTag: String): Unit = {
+    logger.warn(s"Curated image $iid is READY but $imageTag is missing from the registry.")
+    context
+      .update(CU_IMAGE)
+      .set(STATUS, Status.Failed)
+      .set(
+        MIRROR_LOG,
+        s"$imageTag is no longer in the registry, so a computing unit cannot start from " +
+          "it. This happens when the cluster or the registry's storage was rebuilt after " +
+          "the image was mirrored. Refresh the image to mirror it again."
+      )
+      .set(UPDATE_TIME, new Timestamp(System.currentTimeMillis()))
+      .where(IID.eq(iid))
+      .execute()
   }
 
   def nameOf(iid: Int): Option[String] =
