@@ -109,28 +109,53 @@ object ComputingUnitManagingResource {
       EnvironmentalVariable.ENV_S3_ENDPOINT -> StorageConfig.s3Endpoint,
       EnvironmentalVariable.ENV_S3_REGION -> StorageConfig.s3Region,
       EnvironmentalVariable.ENV_S3_AUTH_USERNAME -> StorageConfig.s3Username,
-      EnvironmentalVariable.ENV_S3_AUTH_PASSWORD -> StorageConfig.s3Password,
-      EnvironmentalVariable.ENV_FILE_SERVICE_GET_DATASET_PRESIGNED_URL_ENDPOINT -> EnvironmentalVariable
-        .get(EnvironmentalVariable.ENV_FILE_SERVICE_GET_DATASET_PRESIGNED_URL_ENDPOINT)
-        .get,
-      EnvironmentalVariable.ENV_FILE_SERVICE_UPLOAD_ONE_FILE_TO_DATASET_ENDPOINT -> EnvironmentalVariable
-        .get(EnvironmentalVariable.ENV_FILE_SERVICE_UPLOAD_ONE_FILE_TO_DATASET_ENDPOINT)
-        .get,
-      // Variables for amber setting
-      // TODO: use AmberConfig for the following items. Currently AmberConfig is only accessible in workflow-executing-service
-      EnvironmentalVariable.ENV_SCHEDULE_GENERATOR_ENABLE_COST_BASED_SCHEDULE_GENERATOR -> EnvironmentalVariable
-        .get(EnvironmentalVariable.ENV_SCHEDULE_GENERATOR_ENABLE_COST_BASED_SCHEDULE_GENERATOR)
-        .get,
-      EnvironmentalVariable.ENV_USER_SYS_ENABLED -> EnvironmentalVariable
-        .get(EnvironmentalVariable.ENV_USER_SYS_ENABLED)
-        .get,
-      EnvironmentalVariable.ENV_MAX_WORKFLOW_WEBSOCKET_REQUEST_PAYLOAD_SIZE_KB -> EnvironmentalVariable
-        .get(EnvironmentalVariable.ENV_MAX_WORKFLOW_WEBSOCKET_REQUEST_PAYLOAD_SIZE_KB)
-        .get,
-      EnvironmentalVariable.ENV_AUTH_JWT_SECRET -> EnvironmentalVariable
-        .get(EnvironmentalVariable.ENV_AUTH_JWT_SECRET)
-        .get
-    )
+      EnvironmentalVariable.ENV_S3_AUTH_PASSWORD -> StorageConfig.s3Password
+    ) ++
+      // File-service endpoints and amber settings, which only the deployment knows.
+      // TODO: use AmberConfig for the amber items. Currently AmberConfig is only accessible in workflow-executing-service
+      requiredComputingUnitEnv(EnvironmentalVariable.get)
+
+  /**
+    * Environment variables a computing unit cannot start without, and which have no
+    * sensible default here because only the deployment knows them.
+    *
+    * The helm chart supplies every one, so in a chart deployment they are all present
+    * and in any other topology -- a service started by hand, or from an IDE against a
+    * cluster -- they are all absent. Read with Option.get, the first missing one threw
+    * NoSuchElementException: None.get, which dropwizard renders as "There was an error
+    * processing your request", naming neither the variable nor the cause.
+    */
+  private val requiredComputingUnitEnvNames: Seq[String] = Seq(
+    EnvironmentalVariable.ENV_FILE_SERVICE_GET_DATASET_PRESIGNED_URL_ENDPOINT,
+    EnvironmentalVariable.ENV_FILE_SERVICE_UPLOAD_ONE_FILE_TO_DATASET_ENDPOINT,
+    EnvironmentalVariable.ENV_SCHEDULE_GENERATOR_ENABLE_COST_BASED_SCHEDULE_GENERATOR,
+    EnvironmentalVariable.ENV_USER_SYS_ENABLED,
+    EnvironmentalVariable.ENV_MAX_WORKFLOW_WEBSOCKET_REQUEST_PAYLOAD_SIZE_KB,
+    EnvironmentalVariable.ENV_AUTH_JWT_SECRET
+  )
+
+  /**
+    * The required variables, or a failure naming every one that is missing.
+    *
+    * Every absent variable is reported together rather than one at a time, because where
+    * they are missing they are usually all missing -- failing on the first would mean six
+    * attempts to discover that. Thrown as ServiceUnavailableException so the message
+    * survives to the caller: dropwizard replaces the body of a generic 500, but passes a
+    * WebApplicationException's own message through.
+    */
+  private[resource] def requiredComputingUnitEnv(
+      lookup: String => Option[String]
+  ): Map[String, String] = {
+    val looked = requiredComputingUnitEnvNames.map(name => name -> lookup(name))
+    val missing = looked.collect { case (name, None) => name }
+    if (missing.nonEmpty) {
+      throw new ServiceUnavailableException(
+        "This deployment cannot create a computing unit: required configuration is not " +
+          s"set. Missing environment variable(s): ${missing.mkString(", ")}."
+      )
+    }
+    looked.collect { case (name, Some(value)) => name -> value }.toMap
+  }
 
   case class WorkflowComputingUnitCreationParams(
       name: String,

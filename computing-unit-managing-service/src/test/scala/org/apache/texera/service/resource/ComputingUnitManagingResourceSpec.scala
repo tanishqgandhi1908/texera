@@ -19,7 +19,13 @@
 
 package org.apache.texera.service.resource
 
-import jakarta.ws.rs.{BadRequestException, ForbiddenException, NotFoundException}
+import jakarta.ws.rs.{
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+  ServiceUnavailableException
+}
+import org.apache.texera.common.config.EnvironmentalVariable
 import org.apache.texera.auth.SessionUser
 import org.apache.texera.common.config.KubernetesConfig.maxNumOfRunningComputingUnitsPerUser
 import org.apache.texera.dao.MockTexeraDB
@@ -211,6 +217,43 @@ class ComputingUnitManagingResourceSpec
   it should "refuse a zero heap, which the JVM also refuses" in {
     ComputingUnitManagingResource.parseJvmHeapBytes("0") shouldBe None
     ComputingUnitManagingResource.parseJvmHeapBytes("0g") shouldBe None
+  }
+
+  // These six are supplied by the helm chart and by nothing else, so they are all present
+  // in a chart deployment and all absent in any other topology. Read with Option.get the
+  // first missing one threw NoSuchElementException: None.get, which dropwizard renders as
+  // "There was an error processing your request" -- naming neither the variable nor the
+  // cause, so with six candidates the only way to find the culprit was a debugger.
+  "requiredComputingUnitEnv" should "return every variable when all are set" in {
+    val env = ComputingUnitManagingResource.requiredComputingUnitEnv(name => Some(s"value-$name"))
+    env should have size 6
+    env.values.foreach(_ should startWith("value-"))
+  }
+
+  it should "name the single missing variable" in {
+    val absent = EnvironmentalVariable.ENV_AUTH_JWT_SECRET
+    val thrown = intercept[ServiceUnavailableException] {
+      ComputingUnitManagingResource.requiredComputingUnitEnv(name =>
+        if (name == absent) None else Some("set")
+      )
+    }
+    thrown.getMessage should include(absent)
+  }
+
+  // Reported together rather than one at a time: where they are missing they are usually
+  // all missing, so failing on the first would mean six attempts to learn that.
+  it should "name every missing variable at once" in {
+    val thrown = intercept[ServiceUnavailableException] {
+      ComputingUnitManagingResource.requiredComputingUnitEnv(_ => None)
+    }
+    Seq(
+      EnvironmentalVariable.ENV_FILE_SERVICE_GET_DATASET_PRESIGNED_URL_ENDPOINT,
+      EnvironmentalVariable.ENV_FILE_SERVICE_UPLOAD_ONE_FILE_TO_DATASET_ENDPOINT,
+      EnvironmentalVariable.ENV_SCHEDULE_GENERATOR_ENABLE_COST_BASED_SCHEDULE_GENERATOR,
+      EnvironmentalVariable.ENV_USER_SYS_ENABLED,
+      EnvironmentalVariable.ENV_MAX_WORKFLOW_WEBSOCKET_REQUEST_PAYLOAD_SIZE_KB,
+      EnvironmentalVariable.ENV_AUTH_JWT_SECRET
+    ).foreach(name => thrown.getMessage should include(name))
   }
 
   "getComputingUnitInfo" should "return the owner's local unit with WRITE access and Running status" in {
