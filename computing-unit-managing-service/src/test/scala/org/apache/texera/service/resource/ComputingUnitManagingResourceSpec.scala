@@ -167,6 +167,52 @@ class ComputingUnitManagingResourceSpec
 
   private val resource = new ComputingUnitManagingResource
 
+  // A JVM heap size and a Kubernetes quantity are different grammars, and the two fields
+  // sit next to each other in the same request. `-Xmx1Gi` makes the JVM exit with
+  // "Invalid maximum heap size" inside the container, so the pod only CrashLoopBackOffs
+  // and nothing points back at the input -- which is why this is checked at the boundary.
+  "parseJvmHeapBytes" should "accept the JVM's own heap grammar" in {
+    ComputingUnitManagingResource.parseJvmHeapBytes("1024") shouldBe Some(1024L)
+    ComputingUnitManagingResource.parseJvmHeapBytes("512m") shouldBe Some(512L * 1024 * 1024)
+    ComputingUnitManagingResource.parseJvmHeapBytes("512M") shouldBe Some(512L * 1024 * 1024)
+    ComputingUnitManagingResource.parseJvmHeapBytes("2g") shouldBe Some(2L * 1024 * 1024 * 1024)
+    ComputingUnitManagingResource.parseJvmHeapBytes("2G") shouldBe Some(2L * 1024 * 1024 * 1024)
+    ComputingUnitManagingResource.parseJvmHeapBytes("64k") shouldBe Some(64L * 1024)
+    ComputingUnitManagingResource.parseJvmHeapBytes("  2g  ") shouldBe Some(
+      2L * 1024 * 1024 * 1024
+    )
+  }
+
+  it should "reject the Kubernetes quantity syntax the sibling memory field requires" in {
+    ComputingUnitManagingResource.parseJvmHeapBytes("1Gi") shouldBe None
+    ComputingUnitManagingResource.parseJvmHeapBytes("512Mi") shouldBe None
+    ComputingUnitManagingResource.parseJvmHeapBytes("64Ki") shouldBe None
+  }
+
+  it should "reject malformed and empty input" in {
+    ComputingUnitManagingResource.parseJvmHeapBytes("") shouldBe None
+    ComputingUnitManagingResource.parseJvmHeapBytes("   ") shouldBe None
+    ComputingUnitManagingResource.parseJvmHeapBytes(null) shouldBe None
+    ComputingUnitManagingResource.parseJvmHeapBytes("g") shouldBe None
+    ComputingUnitManagingResource.parseJvmHeapBytes("-1g") shouldBe None
+    ComputingUnitManagingResource.parseJvmHeapBytes("1.5g") shouldBe None
+    ComputingUnitManagingResource.parseJvmHeapBytes("2gb") shouldBe None
+    ComputingUnitManagingResource.parseJvmHeapBytes("2 g") shouldBe None
+    ComputingUnitManagingResource.parseJvmHeapBytes("abc") shouldBe None
+  }
+
+  it should "not overflow on an absurdly large request" in {
+    // BigInt arithmetic then a range check: Long multiplication would wrap and hand back
+    // a plausible-looking small heap instead of refusing the input.
+    ComputingUnitManagingResource.parseJvmHeapBytes("99999999999999999999g") shouldBe None
+    ComputingUnitManagingResource.parseJvmHeapBytes("17592186044416g") shouldBe None
+  }
+
+  it should "refuse a zero heap, which the JVM also refuses" in {
+    ComputingUnitManagingResource.parseJvmHeapBytes("0") shouldBe None
+    ComputingUnitManagingResource.parseJvmHeapBytes("0g") shouldBe None
+  }
+
   "getComputingUnitInfo" should "return the owner's local unit with WRITE access and Running status" in {
     val info = resource.getComputingUnitInfo(800, user)
 

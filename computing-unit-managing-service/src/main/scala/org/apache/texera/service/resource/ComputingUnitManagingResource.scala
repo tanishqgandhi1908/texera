@@ -172,6 +172,34 @@ object ComputingUnitManagingResource {
   case class ComputingUnitTypesResponse(
       typeOptions: List[String]
   )
+
+  private val JvmHeapSize = "^([0-9]+)([kKmMgG]?)$".r
+
+  /**
+    * Bytes for a JVM heap size, or None when the JVM would refuse it.
+    *
+    * Mirrors the JVM's own `-Xmx` grammar: digits with an optional k/m/g multiplier and
+    * nothing else. In particular the Kubernetes forms (`Ki`/`Mi`/`Gi`) are rejected, even
+    * though the adjacent memoryLimit field requires exactly those -- `-Xmx1Gi` makes the
+    * JVM exit with "Invalid maximum heap size" before it can log anything useful, so the
+    * pod only CrashLoopBackOffs and nothing points back at the input that caused it.
+    */
+  private[resource] def parseJvmHeapBytes(raw: String): Option[Long] =
+    Option(raw).map(_.trim).flatMap {
+      case JvmHeapSize(digits, unit) =>
+        val multiplier = unit.toLowerCase match {
+          case "k" => 1024L
+          case "m" => 1024L * 1024
+          case "g" => 1024L * 1024 * 1024
+          case _   => 1L
+        }
+        // Computed as BigInt and range-checked, because Long arithmetic would wrap
+        // silently on an absurd request and yield a plausible-looking small heap. A
+        // zero heap is refused too -- the JVM does not accept -Xmx0 either.
+        val bytes = BigInt(digits) * multiplier
+        if (bytes > 0 && bytes.isValidLong) Some(bytes.toLong) else None
+      case _ => None
+    }
 }
 
 @Produces(Array(MediaType.APPLICATION_JSON))
@@ -311,15 +339,20 @@ class ComputingUnitManagingResource {
               s"(${param.memoryLimit})."
           )
 
-        // JVM heap ≤ total memory
-        val jvmGB = param.jvmMemorySize.replaceAll("[^0-9]", "").toInt
-        val memGB =
-          if (param.memoryLimit.endsWith("Gi")) param.memoryLimit.replaceAll("[^0-9]", "").toInt
-          else if (param.memoryLimit.endsWith("Mi"))
-            param.memoryLimit.replaceAll("[^0-9]", "").toInt / 1024
-          else param.memoryLimit.replaceAll("[^0-9]", "").toInt
+        // JVM heap must be expressed the way the JVM accepts, which is deliberately not
+        // the Kubernetes syntax the memoryLimit field beside it requires.
+        val jvmBytes = parseJvmHeapBytes(param.jvmMemorySize).getOrElse(
+          throw new ForbiddenException(
+            s"JVM memory size '${param.jvmMemorySize}' is not a valid JVM heap size. Use a " +
+              "whole number with an optional k, m or g suffix (examples: 512m, 2g), not the " +
+              s"Kubernetes form used by the memory limit (${param.memoryLimit})."
+          )
+        )
 
-        if (jvmGB > memGB)
+        // Compared in bytes. The previous integer-GB comparison truncated, so a 512Mi
+        // limit read as 0 GB and a 2g heap against a 2500Mi limit compared as 2 vs 2.
+        val memBytes = Quantity.getAmountInBytes(memQuantity).longValue()
+        if (jvmBytes > memBytes)
           throw new ForbiddenException(
             s"JVM memory size (${param.jvmMemorySize}) cannot exceed the " +
               s"total memory limit (${param.memoryLimit})."
