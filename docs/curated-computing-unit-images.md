@@ -146,6 +146,11 @@ development setup. See `bin/demo/curated-images/README.md`.
   runtimes are configured to treat the Service CIDR as insecure. A real deployment
   terminates TLS and gives the pull a credential. There is also no credential path for a
   private *upstream* image, so registered references must be public.
+- **The source registry must serve TLS.** The mirror disables certificate checking only
+  for the destination (the in-cluster registry, which is plain HTTP by design); the
+  inspect of the source does not, deliberately, since turning it off there would drop
+  verification against real upstream registries. A plain-HTTP source therefore fails with
+  `http: server gave HTTP response to HTTPS client`.
 - **A curated image cannot choose to run as root**, but it does have to provide the uid it
   is pinned to. The container sets `runAsNonRoot`, `runAsUser`, no privilege escalation and
   drops every capability, so the image does not get to decide — but `runAsUser` must exist

@@ -213,7 +213,15 @@ through `~/.kube/config`):
 - registering an already-curated reference is refused, and a name with parentheses is
   accepted
 
-**Not verified:** behaviour under the full Helm chart (the above was done with the services
-running outside the cluster), a workflow actually *executing* on a curated unit (the dev
-topology cannot route execution to a chosen unit -- see the note above), re-mirroring an
-existing image, and anything about retention or garbage collection of superseded tags.
+**Also verified under the full Helm chart** (everything in-cluster, reached through the
+Envoy gateway rather than the dev proxy):
+
+- the gateway routes `/api/cu-image` to the computing-unit manager, and the manager's
+  ServiceAccount may create the mirror Job and read its pod's log
+- register -> mirror -> READY, then a unit boots from the mirrored image
+- **a workflow executes on that unit and completes**, returning the five rows its source
+  UDF produces (`n` 0..4). The `?cuid=` on the `/wsapi` socket is what selects the unit,
+  which is the part the dev topology cannot exercise
+
+**Not verified:** re-mirroring an image whose upstream tag has moved, and anything about
+retention or garbage collection of superseded tags.
