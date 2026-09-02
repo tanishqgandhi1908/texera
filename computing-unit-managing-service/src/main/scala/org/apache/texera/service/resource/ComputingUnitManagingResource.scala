@@ -61,7 +61,8 @@ import org.apache.texera.service.util.{
   ComputingUnitManagingServiceException,
   InsufficientComputingUnitQuota,
   KubernetesClient,
-  MounterClient
+  MounterClient,
+  MounterRequestFailed
 }
 import org.jooq.{DSLContext, EnumType}
 import play.api.libs.json._
@@ -888,12 +889,49 @@ class ComputingUnitManagingResource extends LazyLogging {
       )
   }
 
+  /**
+    * Turns "the node mounter did not answer" into something actionable.
+    *
+    * The mounter is a DaemonSet, so it is reachable only on a cluster where it is actually
+    * deployed. Letting the raw ConnectException out produced a bare 500 -- "There was an
+    * error processing your request" -- which says nothing about which address failed or
+    * that the DaemonSet may simply be absent. Not reported as empty either: an unreachable
+    * mounter means the mounts are unknown, not that there are none.
+    */
+  private def withMounter[T](nodeIp: String)(operation: => T): T =
+    try operation
+    catch {
+      case e: java.io.IOException =>
+        throw new ServiceUnavailableException(
+          s"The node mounter at $nodeIp:${KubernetesConfig.mounterPort} did not answer " +
+            s"(${e.getClass.getSimpleName}: ${e.getMessage}). Model mounting needs the " +
+            "texera-mounter DaemonSet running on that node."
+        )
+      // The mounter answered and said it failed. Its message names the real cause -- a
+      // GeeseFS error, a bucket that does not exist -- and is the only thing that makes
+      // this diagnosable, so it is passed on rather than swallowed into a generic 500.
+      case e: MounterRequestFailed =>
+        throw new ServiceUnavailableException(
+          s"The node mounter could not complete the operation: ${e.getMessage}"
+        )
+    }
+
   private def resolveMountModelPath(modelPath: String): (String, (String, String)) = {
     val trimmed = Option(modelPath).map(_.trim).getOrElse("")
     if (trimmed.isEmpty) {
       throw new BadRequestException("modelPath is required")
     }
-    (trimmed, FileResolver.resolveModelVersion(trimmed))
+    // FileResolver signals both "no such model version" and "that is not a model version
+    // path" as FileNotFoundException, which dropwizard would turn into a bare 500 saying
+    // only that the request was logged. Both are the caller's mistake and both messages
+    // already say which, so they are worth passing on.
+    val resolved =
+      try FileResolver.resolveModelVersion(trimmed)
+      catch {
+        case e: org.apache.commons.vfs2.FileNotFoundException =>
+          throw new BadRequestException(Option(e.getMessage).getOrElse(s"Unknown model $trimmed."))
+      }
+    (trimmed, resolved)
   }
 
   /** The models currently mounted on the given computing unit. */
@@ -912,7 +950,9 @@ class ComputingUnitManagingResource extends LazyLogging {
       return List.empty
     }
     val nodeIp = mountNodeIp(cuid)
-    MounterClient.listMounts(nodeIp, KubernetesConfig.mounterPort, cuid.toString).map { entry =>
+    withMounter(nodeIp) {
+      MounterClient.listMounts(nodeIp, KubernetesConfig.mounterPort, cuid.toString)
+    }.map { entry =>
       val modelPath =
         FileResolver
           .reverseResolveModelVersion(entry.repositoryName, entry.commitHash)
@@ -940,15 +980,17 @@ class ComputingUnitManagingResource extends LazyLogging {
     // file-service verifies it and checks that user's read access to the model. No global
     // LakeFS credential is handed to the mounter or to the pod.
     val userToken = JwtAuth.jwtToken(jwtClaims(user.user))
-    val mountPath = MounterClient.mount(
-      nodeIp,
-      KubernetesConfig.mounterPort,
-      cuid.toString,
-      repositoryName,
-      commitHash,
-      userToken,
-      fileServiceBaseUrl
-    )
+    val mountPath = withMounter(nodeIp) {
+      MounterClient.mount(
+        nodeIp,
+        KubernetesConfig.mounterPort,
+        cuid.toString,
+        repositoryName,
+        commitHash,
+        userToken,
+        fileServiceBaseUrl
+      )
+    }
     MountedModelInfo(modelPath, repositoryName, commitHash, mountPath)
   }
 
@@ -967,13 +1009,15 @@ class ComputingUnitManagingResource extends LazyLogging {
     requireKubernetesUnit(cuid)
     val (_, (repositoryName, commitHash)) = resolveMountModelPath(params.modelPath)
     val nodeIp = mountNodeIp(cuid)
-    MounterClient.unmount(
-      nodeIp,
-      KubernetesConfig.mounterPort,
-      cuid.toString,
-      repositoryName,
-      commitHash
-    )
+    withMounter(nodeIp) {
+      MounterClient.unmount(
+        nodeIp,
+        KubernetesConfig.mounterPort,
+        cuid.toString,
+        repositoryName,
+        commitHash
+      )
+    }
     Response.ok().build()
   }
 }

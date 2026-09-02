@@ -153,7 +153,7 @@ export class ResourceValueSelectorComponent extends FieldType<FieldTypeConfig> {
             "does not have that environment installed. Without it the operator runs on the default " +
             "Python environment, whose library versions may not match the model.\n\n" +
             `To use it: open the computing unit's Python Environments panel, load "${hint.pveName}", ` +
-            "then set this operator's \"Virtual Environment\" to it.",
+            'then set this operator\'s "Virtual Environment" to it.',
           nzOkText: "Got it",
         });
       });

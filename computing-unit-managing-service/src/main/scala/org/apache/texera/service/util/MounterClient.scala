@@ -32,6 +32,14 @@ import scala.util.Using
   * request here. The mounter holds no credentials; the JWT passed on mount is forwarded to
   * GeeseFS as the S3 access key so authorization stays entirely in file-service.
   */
+/**
+  * The node mounter answered, and said the operation failed. Distinct from an IOException
+  * (the mounter could not be reached at all) and from any other exception (a defect here),
+  * so the caller can pass the node's own explanation on rather than let it be swallowed
+  * into a generic 500.
+  */
+class MounterRequestFailed(message: String) extends RuntimeException(message)
+
 object MounterClient {
 
   case class MountEntry(repositoryName: String, commitHash: String, mountPath: String)
@@ -112,7 +120,10 @@ object MounterClient {
         .map(s => new String(s.readAllBytes(), StandardCharsets.UTF_8))
         .getOrElse("")
       if (code < 200 || code >= 300) {
-        throw new RuntimeException(s"mounter $method $url failed: HTTP $code $text")
+        // Typed rather than a bare RuntimeException so the caller can tell "the mount
+        // itself failed, and here is what the node said" apart from a defect, and pass
+        // the mounter's own message on instead of letting it become an opaque 500.
+        throw new MounterRequestFailed(s"mounter $method $url failed: HTTP $code $text")
       }
       if (text.isEmpty) Json.obj() else Json.parse(text)
     } finally {
