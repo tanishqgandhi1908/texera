@@ -23,7 +23,7 @@ import com.typesafe.scalalogging.LazyLogging
 import io.fabric8.kubernetes.api.model._
 import io.fabric8.kubernetes.api.model.metrics.v1beta1.PodMetrics
 import io.fabric8.kubernetes.client.KubernetesClientBuilder
-import org.apache.texera.common.config.KubernetesConfig
+import org.apache.texera.common.config.{EnvironmentalVariable, KubernetesConfig}
 
 import scala.jdk.CollectionConverters._
 
@@ -36,13 +36,28 @@ import scala.jdk.CollectionConverters._
 class KubernetesClient(client: io.fabric8.kubernetes.client.KubernetesClient) extends LazyLogging {
 
   private val namespace: String = KubernetesConfig.computeUnitPoolNamespace
-  private val podNamePrefix = "computing-unit"
+  private val podNamePrefix = KubernetesConfig.computeUnitPodNamePrefix
 
   def generatePodURI(cuid: Int): String = {
     s"${generatePodName(cuid)}.${KubernetesConfig.computeUnitServiceName}.$namespace.svc.cluster.local:${KubernetesConfig.computeUnitPortNumber}"
   }
 
   def generatePodName(cuid: Int): String = s"$podNamePrefix-$cuid"
+
+  /**
+    * The host directory a computing unit's model mounts live in.
+    *
+    * The cuid in here is the whole of the isolation between computing units. A CU pod
+    * mounts this directory and nothing above it, and the mounter creates every GeeseFS
+    * mount for that CU underneath it, so two CUs that mount the same model version get
+    * two separate mounts and neither can reach the other's. Dropping the cuid -- keying on
+    * repository and commit alone, which is how a model version is named everywhere else --
+    * would quietly collapse them into one shared mount.
+    */
+  def mountHostPath(cuid: Int): String = s"${KubernetesConfig.mounterHostRoot}/$cuid"
+
+  /** Root, inside a CU pod, that the mounter's mounts appear under via propagation. */
+  private val inPodMountRoot = "/mnt/texera-mounts"
 
   def podExists(cuid: Int): Boolean = {
     getPodByName(generatePodName(cuid)).isDefined
@@ -155,16 +170,37 @@ class KubernetesClient(client: io.fabric8.kubernetes.client.KubernetesClient) ex
       throw new Exception(s"Pod with cuid $cuid already exists")
     }
 
-    val envList = envVars
-      .map {
-        case (key, value) =>
-          new EnvVarBuilder()
-            .withName(key)
-            .withValue(value.toString)
-            .build()
-      }
-      .toList
-      .asJava
+    val baseEnv = envVars.map {
+      case (key, value) =>
+        new EnvVarBuilder().withName(key).withValue(value.toString).build()
+    }.toList
+
+    // Env for the out-of-pod mounter: the node IP (downward API) plus this CU's id,
+    // the mounter port, and the in-pod root that the propagated mount appears under.
+    val mounterEnv = List(
+      new EnvVarBuilder()
+        .withName(EnvironmentalVariable.ENV_NODE_IP)
+        .withNewValueFrom()
+        .withNewFieldRef()
+        .withFieldPath("status.hostIP")
+        .endFieldRef()
+        .endValueFrom()
+        .build(),
+      new EnvVarBuilder()
+        .withName(EnvironmentalVariable.ENV_CU_ID)
+        .withValue(cuid.toString)
+        .build(),
+      new EnvVarBuilder()
+        .withName(EnvironmentalVariable.ENV_MOUNTER_PORT)
+        .withValue(KubernetesConfig.mounterPort.toString)
+        .build(),
+      new EnvVarBuilder()
+        .withName(EnvironmentalVariable.ENV_MOUNT_IN_POD_ROOT)
+        .withValue(inPodMountRoot)
+        .build()
+    )
+
+    val envList = (baseEnv ++ mounterEnv).asJava
 
     // Setup the resource requirements
     val resourceBuilder = new ResourceRequirementsBuilder()
@@ -207,6 +243,16 @@ class KubernetesClient(client: io.fabric8.kubernetes.client.KubernetesClient) ex
       .withEnv(envList)
       .withResources(resourceBuilder.build())
 
+    // The FUSE mount is performed by the per-node texera-mounter (privileged), not here,
+    // so this pod stays UNPRIVILEGED. It only *receives* the mount via HostToContainer
+    // propagation from a host directory scoped to this CU id (see the hostPath volume below).
+    containerBuilder
+      .addNewVolumeMount()
+      .withName("texera-mounts")
+      .withMountPath(inPodMountRoot)
+      .withMountPropagation("HostToContainer")
+      .endVolumeMount()
+
     // If shmSize requested, mount /dev/shm
     shmSize.foreach { _ =>
       containerBuilder
@@ -231,6 +277,17 @@ class KubernetesClient(client: io.fabric8.kubernetes.client.KubernetesClient) ex
         )
         .endVolume()
     }
+
+    // Per-CU host directory the mounter mounts into (DirectoryOrCreate so it exists
+    // before the mounter mounts). Scoped by cuid so a CU can only ever see its own mounts.
+    specBuilder
+      .addNewVolume()
+      .withName("texera-mounts")
+      .withNewHostPath()
+      .withPath(mountHostPath(cuid))
+      .withType("DirectoryOrCreate")
+      .endHostPath()
+      .endVolume()
 
     val pod = specBuilder
       .withHostname(podName)

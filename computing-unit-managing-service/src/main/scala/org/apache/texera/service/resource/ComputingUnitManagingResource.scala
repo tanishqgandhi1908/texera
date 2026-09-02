@@ -41,6 +41,7 @@ import org.apache.texera.common.config.{
   StorageConfig
 }
 import com.typesafe.scalalogging.LazyLogging
+import org.apache.texera.amber.core.storage.FileResolver
 import org.apache.texera.dao.SqlServer
 import org.apache.texera.dao.SqlServer.withTransaction
 import org.apache.texera.dao.jooq.generated.enums.{
@@ -59,7 +60,8 @@ import org.apache.texera.service.util.{
   ComputingUnitHelpers,
   ComputingUnitManagingServiceException,
   InsufficientComputingUnitQuota,
-  KubernetesClient
+  KubernetesClient,
+  MounterClient
 }
 import org.jooq.{DSLContext, EnumType}
 import play.api.libs.json._
@@ -200,6 +202,34 @@ object ComputingUnitManagingResource {
   case class ComputingUnitTypesResponse(
       typeOptions: List[String]
   )
+
+  /**
+    * A model version mounted on a computing unit. `modelPath` is the readable
+    * /model/ownerEmail/modelName/versionName (empty when it could not be reverse-resolved);
+    * repositoryName/commitHash identify it to the mounter; mountPath is where it landed.
+    */
+  case class MountedModelInfo(
+      modelPath: String,
+      repositoryName: String,
+      commitHash: String,
+      mountPath: String
+  )
+
+  case class ModelMountParams(modelPath: String)
+
+  /**
+    * Base URL (scheme://authority) of file-service as the mounter should reach it, derived
+    * from the presigned-URL endpoint this service is already configured with. The mounter's
+    * GeeseFS mount targets the JWT-authenticated S3 proxy hosted at that root, so there is
+    * no second endpoint to configure and no way for the two to disagree.
+    */
+  private lazy val fileServiceBaseUrl: String = {
+    val endpoint = EnvironmentalVariable
+      .get(EnvironmentalVariable.ENV_FILE_SERVICE_GET_DATASET_PRESIGNED_URL_ENDPOINT)
+      .getOrElse("http://localhost:9092/api/dataset/presign-download")
+    val uri = new java.net.URI(endpoint)
+    s"${uri.getScheme}://${uri.getAuthority}"
+  }
 
   private val JvmHeapSize = "^([0-9]+)([kKmMgG]?)$".r
 
@@ -819,5 +849,131 @@ class ComputingUnitManagingResource extends LazyLogging {
     }
     val computingUnit = getComputingUnitByCuid(context, cuid.toInt)
     getComputingUnitResourceLimit(computingUnit)
+  }
+
+  // -- Model mounts --------------------------------------------------------
+  // A model version is FUSE-mounted into a computing unit by that unit's node mounter, a
+  // privileged per-node DaemonSet, so the user-facing CU pod never needs privileges. This
+  // service is the authenticated proxy in front of that mounter. Mount state lives only on
+  // the mounter, derived from the kernel's mount table, so there is nothing to persist.
+
+  private def requireMountAccess(cuid: Int, uid: Integer): Unit = {
+    if (
+      !userOwnComputingUnit(context, cuid, uid) &&
+      !ComputingUnitAccessResource.hasWriteAccess(cuid, uid)
+    ) {
+      throw new ForbiddenException(
+        "User does not have permission to manage mounts on this computing unit"
+      )
+    }
+  }
+
+  private def requireKubernetesUnit(cuid: Int): Unit = {
+    if (getComputingUnitByCuid(context, cuid).getType != WorkflowComputingUnitTypeEnum.kubernetes) {
+      throw new BadRequestException(
+        "Model mounting is only supported for Kubernetes computing units."
+      )
+    }
+  }
+
+  /** Node IP the CU pod is scheduled on, needed to reach that node's mounter. */
+  private def mountNodeIp(cuid: Int): String = {
+    KubernetesClient
+      .getPodByName(KubernetesClient.generatePodName(cuid))
+      .flatMap(pod => Option(pod.getStatus).flatMap(status => Option(status.getHostIP)))
+      .getOrElse(
+        throw new BadRequestException(
+          s"Computing unit $cuid is not running on a node yet; cannot manage mounts."
+        )
+      )
+  }
+
+  private def resolveMountModelPath(modelPath: String): (String, (String, String)) = {
+    val trimmed = Option(modelPath).map(_.trim).getOrElse("")
+    if (trimmed.isEmpty) {
+      throw new BadRequestException("modelPath is required")
+    }
+    (trimmed, FileResolver.resolveModelVersion(trimmed))
+  }
+
+  /** The models currently mounted on the given computing unit. */
+  @GET
+  @RolesAllowed(Array("REGULAR", "ADMIN"))
+  @Produces(Array(MediaType.APPLICATION_JSON))
+  @Path("/{cuid}/mounts")
+  def listMountedModels(
+      @PathParam("cuid") cuid: Integer,
+      @Auth user: SessionUser
+  ): List[MountedModelInfo] = {
+    requireMountAccess(cuid, user.getUid)
+    // A local unit has no node mounter, and asking for its mounts is a reasonable thing
+    // for a general-purpose UI to do, so this is empty rather than an error.
+    if (getComputingUnitByCuid(context, cuid).getType != WorkflowComputingUnitTypeEnum.kubernetes) {
+      return List.empty
+    }
+    val nodeIp = mountNodeIp(cuid)
+    MounterClient.listMounts(nodeIp, KubernetesConfig.mounterPort, cuid.toString).map { entry =>
+      val modelPath =
+        FileResolver
+          .reverseResolveModelVersion(entry.repositoryName, entry.commitHash)
+          .getOrElse("")
+      MountedModelInfo(modelPath, entry.repositoryName, entry.commitHash, entry.mountPath)
+    }
+  }
+
+  /** Mounts a model version onto the given computing unit. */
+  @POST
+  @RolesAllowed(Array("REGULAR", "ADMIN"))
+  @Consumes(Array(MediaType.APPLICATION_JSON))
+  @Produces(Array(MediaType.APPLICATION_JSON))
+  @Path("/{cuid}/mounts")
+  def mountModel(
+      @PathParam("cuid") cuid: Integer,
+      params: ModelMountParams,
+      @Auth user: SessionUser
+  ): MountedModelInfo = {
+    requireMountAccess(cuid, user.getUid)
+    requireKubernetesUnit(cuid)
+    val (modelPath, (repositoryName, commitHash)) = resolveMountModelPath(params.modelPath)
+    val nodeIp = mountNodeIp(cuid)
+    // A token for the requesting user, forwarded to GeeseFS as its S3 access key;
+    // file-service verifies it and checks that user's read access to the model. No global
+    // LakeFS credential is handed to the mounter or to the pod.
+    val userToken = JwtAuth.jwtToken(jwtClaims(user.user))
+    val mountPath = MounterClient.mount(
+      nodeIp,
+      KubernetesConfig.mounterPort,
+      cuid.toString,
+      repositoryName,
+      commitHash,
+      userToken,
+      fileServiceBaseUrl
+    )
+    MountedModelInfo(modelPath, repositoryName, commitHash, mountPath)
+  }
+
+  /** Unmounts a model version from the given computing unit. */
+  @DELETE
+  @RolesAllowed(Array("REGULAR", "ADMIN"))
+  @Consumes(Array(MediaType.APPLICATION_JSON))
+  @Produces(Array(MediaType.APPLICATION_JSON))
+  @Path("/{cuid}/mounts")
+  def unmountModel(
+      @PathParam("cuid") cuid: Integer,
+      params: ModelMountParams,
+      @Auth user: SessionUser
+  ): Response = {
+    requireMountAccess(cuid, user.getUid)
+    requireKubernetesUnit(cuid)
+    val (_, (repositoryName, commitHash)) = resolveMountModelPath(params.modelPath)
+    val nodeIp = mountNodeIp(cuid)
+    MounterClient.unmount(
+      nodeIp,
+      KubernetesConfig.mounterPort,
+      cuid.toString,
+      repositoryName,
+      commitHash
+    )
+    Response.ok().build()
   }
 }

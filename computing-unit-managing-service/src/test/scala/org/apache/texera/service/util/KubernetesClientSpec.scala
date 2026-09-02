@@ -298,8 +298,60 @@ class KubernetesClientSpec extends AnyFlatSpec with Matchers {
     limits("cpu") shouldBe "2"
     limits("memory") shouldBe "4Gi"
     // Env values arrive as Any and reach the container as strings.
-    container.getEnv.asScala.map(e => e.getName -> e.getValue).toMap shouldBe
-      Map("UID" -> "9", "MODE" -> "batch")
+    val env = container.getEnv.asScala.map(e => e.getName -> e.getValue).toMap
+    env("UID") shouldBe "9"
+    env("MODE") shouldBe "batch"
+
+    // Every pod also carries what it needs to reach its node's mounter. NODE_IP has no
+    // literal value on purpose -- it is read from the downward API, because the node a
+    // pod lands on is not known until it is scheduled.
+    env("TEXERA_CU_ID") shouldBe "5"
+    env("TEXERA_MOUNTER_PORT") shouldBe KubernetesConfig.mounterPort.toString
+    env("TEXERA_MOUNT_IN_POD_ROOT") shouldBe "/mnt/texera-mounts"
+    env should contain key "NODE_IP"
+    val nodeIp = container.getEnv.asScala.find(_.getName == "NODE_IP").get
+    nodeIp.getValue shouldBe null
+    nodeIp.getValueFrom.getFieldRef.getFieldPath shouldBe "status.hostIP"
+  }
+
+  // The CU pod is user-facing and stays unprivileged: it only *receives* the FUSE mount
+  // the privileged per-node mounter makes, through HostToContainer propagation. The cuid
+  // in the host path is the whole of the isolation between units, so a unit cannot reach
+  // another unit's mounts.
+  it should "receive the node mounter's mounts without needing privileges" in {
+    val name = KubernetesClient.generatePodName(5)
+    val (client, _) = clientWithNamedPod(name, null)
+    val namespaceable = mock(classOf[NamespaceableResource[Pod]])
+    val resource = mock(classOf[Resource[Pod]])
+    val captor = ArgumentCaptor.forClass(classOf[Pod])
+    when(client.resource(any(classOf[Pod]))).thenReturn(namespaceable)
+    when(namespaceable.inNamespace(namespace)).thenReturn(resource)
+    when(resource.create()).thenReturn(null)
+
+    new KubernetesClient(client).createPod(5, "1", "2Gi", "0", Map.empty)
+
+    verify(client).resource(captor.capture())
+    val built = captor.getValue
+    val container = built.getSpec.getContainers.asScala.head
+
+    val mount = container.getVolumeMounts.asScala.find(_.getName == "texera-mounts").get
+    mount.getMountPath shouldBe "/mnt/texera-mounts"
+    mount.getMountPropagation shouldBe "HostToContainer"
+
+    val volume = built.getSpec.getVolumes.asScala.find(_.getName == "texera-mounts").get
+    volume.getHostPath.getPath shouldBe KubernetesClient.mountHostPath(5)
+    volume.getHostPath.getPath should endWith("/5")
+    // DirectoryOrCreate so the path exists before the mounter mounts into it.
+    volume.getHostPath.getType shouldBe "DirectoryOrCreate"
+
+    // Nothing here asks for privileges; that is the mounter's job, not the CU's.
+    Option(container.getSecurityContext).flatMap(c => Option(c.getPrivileged)) shouldBe None
+  }
+
+  "mountHostPath" should "scope a unit's mounts to its own cuid" in {
+    KubernetesClient.mountHostPath(7) should endWith("/7")
+    KubernetesClient.mountHostPath(7) should not be KubernetesClient.mountHostPath(8)
+    KubernetesClient.mountHostPath(7) should startWith(KubernetesConfig.mounterHostRoot)
   }
 
   it should "mount a shared-memory volume only when a size is asked for" in {

@@ -30,6 +30,7 @@ object KubernetesConfig {
   val computeUnitServiceName: String = conf.getString("kubernetes.compute-unit-service-name")
   val computeUnitPoolName: String = conf.getString("kubernetes.compute-unit-pool-name")
   val computeUnitPoolNamespace: String = conf.getString("kubernetes.compute-unit-pool-namespace")
+  val computeUnitPodNamePrefix: String = conf.getString("kubernetes.compute-unit-pod-name-prefix")
   val computeUnitImageName: String = conf.getString("kubernetes.image-name")
   val computingUnitImagePullPolicy: String = conf.getString("kubernetes.image-pull-policy")
 
@@ -78,4 +79,8 @@ object KubernetesConfig {
   // Browser-facing address with {uid} substituted; empty means use the in-network one.
   val jupyterPublicUrlTemplate: String =
     conf.getString("kubernetes.jupyter-public-url-template")
+
+  // Per-node mounter that performs the FUSE mount outside the (unprivileged) CU pod.
+  val mounterPort: Int = conf.getInt("kubernetes.mounter-port")
+  val mounterHostRoot: String = conf.getString("kubernetes.mounter-host-root")
 }

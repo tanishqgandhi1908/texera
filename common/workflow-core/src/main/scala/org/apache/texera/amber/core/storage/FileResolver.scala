@@ -245,6 +245,84 @@ object FileResolver {
     *
     * @throws java.io.FileNotFoundException if the model or version does not exist
     */
+  /**
+    * Resolves a model version path to its LakeFS repository name and commit hash.
+    * Expected format: /model/ownerEmail/modelName/versionName
+    *   e.g. /model/bob@texera.com/resnet/v1
+    *
+    * Unlike [[resolve]] this addresses a whole model *version* rather than a file inside
+    * one: a mount exposes the entire version, so there is no file-relative path involved.
+    *
+    * @throws java.io.FileNotFoundException if the model or version cannot be found, or the
+    *                                       path is not a well-formed model version path
+    */
+  def resolveModelVersion(modelPath: String): (String, String) =
+    resolveVersionPath(modelPath, ResourceType.Model, lookupModel)
+
+  /**
+    * Resolves a dataset version path to its LakeFS repository name and commit hash.
+    * Expected format: /dataset/ownerEmail/datasetName/versionName
+    *
+    * The dataset counterpart of [[resolveModelVersion]], for the same reason: a mount
+    * exposes a whole version, so no file-relative path is involved.
+    *
+    * @throws java.io.FileNotFoundException if the dataset or version cannot be found, or
+    *                                       the path is not a well-formed version path
+    */
+  def resolveDatasetVersion(datasetPath: String): (String, String) =
+    resolveVersionPath(datasetPath, ResourceType.Dataset, lookupDataset)
+
+  /**
+    * Shared shape of [[resolveModelVersion]] and [[resolveDatasetVersion]]: split
+    * /<prefix>/ownerEmail/name/versionName and hand the three parts to `lookup`.
+    */
+  private def resolveVersionPath(
+      versionPath: String,
+      resourceType: ResourceType.Value,
+      lookup: (String, String, String, String) => (String, String)
+  ): (String, String) = {
+    val path = Paths.get(versionPath)
+    val segments = (0 until path.getNameCount).map(path.getName(_).toString)
+    if (segments.length < 4 || segments.head != resourceType.toString) {
+      throw new FileNotFoundException(
+        s"Version path $versionPath is invalid; " +
+          s"expected /$resourceType/ownerEmail/name/versionName."
+      )
+    }
+    lookup(segments(1), segments(2), segments(3), versionPath)
+  }
+
+  /**
+    * Reverse of [[resolveModelVersion]]: given a LakeFS repository name and commit hash,
+    * recover the readable model version path /model/ownerEmail/modelName/versionName.
+    *
+    * Used to label the models mounted on a computing unit, which the mounter tracks only
+    * by repository and commit. None when no such model version exists -- a mount can
+    * outlive the model version it came from, and that is not an error worth failing a
+    * listing over.
+    */
+  def reverseResolveModelVersion(
+      repositoryName: String,
+      versionHash: String
+  ): Option[String] =
+    withTransaction(
+      SqlServer
+        .getInstance()
+        .createDSLContext()
+    ) { ctx =>
+      val record = ctx
+        .select(USER.EMAIL, MODEL.NAME, MODEL_VERSION.NAME)
+        .from(MODEL)
+        .join(USER)
+        .on(USER.UID.eq(MODEL.OWNER_UID))
+        .join(MODEL_VERSION)
+        .on(MODEL_VERSION.MID.eq(MODEL.MID))
+        .where(MODEL.REPOSITORY_NAME.eq(repositoryName))
+        .and(MODEL_VERSION.VERSION_HASH.eq(versionHash))
+        .fetchOne()
+      Option(record).map(r => s"/${ResourceType.Model}/${r.value1()}/${r.value2()}/${r.value3()}")
+    }
+
   private def lookupModel(
       ownerEmail: String,
       modelName: String,
