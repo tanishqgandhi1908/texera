@@ -281,6 +281,18 @@ litellm:
           model: gpt-5-mini
           api_key: "os.environ/OPENAI_API_KEY"
 
+# Per-node privileged DaemonSet that performs the GeeseFS FUSE mount for computing-unit
+# pods, so the CU pods themselves stay unprivileged. port and hostMountRoot MUST match what
+# the computing-unit manager reads (kubernetes.mounter-port / kubernetes.mounter-host-root),
+# since the pod reaches its node's mounter on that port and receives the mount from that
+# path.
+mounter:
+  imageName: texera-mounter
+  imagePullPolicy: IfNotPresent
+  port: 8100
+  hostMountRoot: /var/lib/texera-mounts
+  serviceAccountName: texera-mounter-service-account
+
 # Curated computing-unit images. An administrator registers an image reference and Texera
 # mirrors whatever it points at into cuImageRegistry below, so a unit never pulls from an
 # upstream registry when it starts -- which also keeps upstream rate limits off the start
@@ -336,6 +348,9 @@ workflowComputingUnitPool:
     memory: 100Gi
     nvidiaGpu: 5
   imageName: texera-workflow-execution-coordinator
+  # Computing-unit pods are named "<podNamePrefix>-<cuid>". The mounter derives a CU's id
+  # back out of the pod name, so it and the manager must be given the same value.
+  podNamePrefix: computing-unit
   service:
     port: 8085
     targetPort: 8085
