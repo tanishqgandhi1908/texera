@@ -40,6 +40,7 @@ import org.apache.texera.common.config.{
   KubernetesConfig,
   StorageConfig
 }
+import com.typesafe.scalalogging.LazyLogging
 import org.apache.texera.dao.SqlServer
 import org.apache.texera.dao.SqlServer.withTransaction
 import org.apache.texera.dao.jooq.generated.enums.{
@@ -206,7 +207,7 @@ object ComputingUnitManagingResource {
 
 @Produces(Array(MediaType.APPLICATION_JSON))
 @Path("/computing-unit")
-class ComputingUnitManagingResource {
+class ComputingUnitManagingResource extends LazyLogging {
 
   private def getComputingUnitByCuid(ctx: DSLContext, cuid: Int): WorkflowComputingUnit = {
     val wcDao = new WorkflowComputingUnitDao(ctx.configuration())
@@ -461,52 +462,73 @@ class ComputingUnitManagingResource {
       val cuid = ctx.lastID().intValue()
       val insertedUnit = wcDao.fetchOneByCuid(cuid)
 
-      if (cuType == WorkflowComputingUnitTypeEnum.kubernetes && insertedUnit != null) {
-        // 1. Update the DB with the URI
-        insertedUnit.setUri(KubernetesClient.generatePodURI(cuid))
+      // A pod outlives the transaction that created it, so anything throwing after it
+      // exists has to take it back down. Without this, a failure between pod creation
+      // and the end of the transaction rolled the row back and left the pod running
+      // with nothing referencing it: one was observed crash-looping for eight hours,
+      // invisible to Texera, reapable only by hand.
+      var createdPodCuid: Option[Int] = None
+      try {
+        if (cuType == WorkflowComputingUnitTypeEnum.kubernetes && insertedUnit != null) {
+          // 1. Update the DB with the URI
+          insertedUnit.setUri(KubernetesClient.generatePodURI(cuid))
 
-        val updatedResource: JsObject =
-          Json
-            .parse(insertedUnit.getResource)
-            .as[JsObject] ++
-            Json.obj("nodeAddresses" -> Json.arr(insertedUnit.getUri))
+          val updatedResource: JsObject =
+            Json
+              .parse(insertedUnit.getResource)
+              .as[JsObject] ++
+              Json.obj("nodeAddresses" -> Json.arr(insertedUnit.getUri))
 
-        insertedUnit.setResource(Json.stringify(updatedResource))
-        wcDao.update(insertedUnit)
+          insertedUnit.setResource(Json.stringify(updatedResource))
+          wcDao.update(insertedUnit)
 
-        // 2. Launch the pod as CU
-        try {
-          KubernetesClient.createPod(
-            cuid,
-            param.cpuLimit,
-            param.memoryLimit,
-            param.gpuLimit,
-            computingUnitEnvironmentVariables ++ Map(
-              EnvironmentalVariable.ENV_USER_JWT_TOKEN -> userToken,
-              EnvironmentalVariable.ENV_JAVA_OPTS -> s"-Xmx${param.jvmMemorySize}"
-            ),
-            Some(param.shmSize),
-            curatedImage
-          )
-
-        } catch {
-          case e: KubernetesClientException =>
-            throw ComputingUnitManagingServiceException.fromKubernetes(e)
-
-          case t: Throwable =>
-            throw t
+          // 2. Launch the pod as CU
+          try {
+            KubernetesClient.createPod(
+              cuid,
+              param.cpuLimit,
+              param.memoryLimit,
+              param.gpuLimit,
+              computingUnitEnvironmentVariables ++ Map(
+                EnvironmentalVariable.ENV_USER_JWT_TOKEN -> userToken,
+                EnvironmentalVariable.ENV_JAVA_OPTS -> s"-Xmx${param.jvmMemorySize}"
+              ),
+              Some(param.shmSize),
+              curatedImage
+            )
+            createdPodCuid = Some(cuid)
+          } catch {
+            case e: KubernetesClientException =>
+              throw ComputingUnitManagingServiceException.fromKubernetes(e)
+          }
         }
-      }
 
-      DashboardWorkflowComputingUnit(
-        insertedUnit,
-        ComputingUnitHelpers.getComputingUnitStatus(insertedUnit).toString,
-        ComputingUnitHelpers.getComputingUnitMetrics(insertedUnit),
-        isOwner = true,
-        accessPrivilege = PrivilegeEnum.WRITE,
-        ownerAvatar,
-        ownerUsername
-      )
+        DashboardWorkflowComputingUnit(
+          insertedUnit,
+          ComputingUnitHelpers.getComputingUnitStatus(insertedUnit).toString,
+          ComputingUnitHelpers.getComputingUnitMetrics(insertedUnit),
+          isOwner = true,
+          accessPrivilege = PrivilegeEnum.WRITE,
+          ownerAvatar,
+          ownerUsername
+        )
+      } catch {
+        case t: Throwable =>
+          createdPodCuid.foreach { orphanCuid =>
+            try KubernetesClient.deletePod(orphanCuid)
+            catch {
+              // Reported rather than rethrown: the original failure is what the caller
+              // needs to see, and shadowing it with a cleanup error would lose it.
+              case cleanupError: Throwable =>
+                logger.error(
+                  s"Computing unit $orphanCuid failed to be created and its pod could " +
+                    "not be removed; it may need deleting by hand.",
+                  cleanupError
+                )
+            }
+          }
+          throw t
+      }
     }
   }
 

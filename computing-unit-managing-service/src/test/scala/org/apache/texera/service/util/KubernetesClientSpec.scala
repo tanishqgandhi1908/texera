@@ -172,6 +172,28 @@ class KubernetesClientSpec extends AnyFlatSpec with Matchers {
     k8s.getPodMetrics(1) shouldBe Map("cpu" -> "250m", "memory" -> "128Mi")
     k8s.getPodMetrics(999) shouldBe empty
   }
+
+  // metrics.k8s.io is an add-on, not part of core Kubernetes: a cluster without
+  // metrics-server answers 404, and minikube ships without it. Metrics are only
+  // reported, never acted on, so an absent add-on must not turn into a failed
+  // operation -- it used to surface while creating a computing unit, after the pod had
+  // already been created, and the rollback then left that pod orphaned.
+  private def clientWithFailingMetrics(): Fabric8Client = {
+    val client = stubbedClient(Seq.empty, Seq.empty)
+    when(client.top().pods().metrics(namespace))
+      .thenThrow(new RuntimeException("Failure executing: GET at metrics.k8s.io: Not Found"))
+    client
+  }
+
+  it should "report no metrics rather than fail when the metrics API is unavailable" in {
+    val k8s = new KubernetesClient(clientWithFailingMetrics())
+    k8s.getPodMetrics(1) shouldBe empty
+  }
+
+  "getAllPodMetrics" should "be empty rather than fail when the metrics API is unavailable" in {
+    val k8s = new KubernetesClient(clientWithFailingMetrics())
+    k8s.getAllPodMetrics shouldBe empty
+  }
   // ── single-pod lookups, creation and deletion ──
   // These reach the rest of the fluent chain: withName(...).get() for the lookups,
   // resource(pod).inNamespace(...).create() for creation, and .delete() for removal. Everything

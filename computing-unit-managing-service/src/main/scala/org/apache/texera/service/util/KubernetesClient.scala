@@ -19,6 +19,7 @@
 
 package org.apache.texera.service.util
 
+import com.typesafe.scalalogging.LazyLogging
 import io.fabric8.kubernetes.api.model._
 import io.fabric8.kubernetes.api.model.metrics.v1beta1.PodMetrics
 import io.fabric8.kubernetes.client.KubernetesClientBuilder
@@ -32,7 +33,7 @@ import scala.jdk.CollectionConverters._
   * parameter (not a mutable global) so tests can construct an instance backed by a stubbed
   * client and exercise the passthrough wrappers without a live cluster.
   */
-class KubernetesClient(client: io.fabric8.kubernetes.client.KubernetesClient) {
+class KubernetesClient(client: io.fabric8.kubernetes.client.KubernetesClient) extends LazyLogging {
 
   private val namespace: String = KubernetesConfig.computeUnitPoolNamespace
   private val podNamePrefix = "computing-unit"
@@ -80,8 +81,29 @@ class KubernetesClient(client: io.fabric8.kubernetes.client.KubernetesClient) {
     items.map(podMetrics => podMetrics.getMetadata.getName -> containerUsage(podMetrics)).toMap
 
   // One namespace-wide metrics call, returning the raw per-pod items.
+  /**
+    * Pod metrics, or nothing when the cluster cannot answer.
+    *
+    * Metrics come from the metrics.k8s.io aggregated API, which is an add-on: a cluster
+    * without metrics-server answers 404, and minikube has none by default. Metrics are
+    * presentation data -- the UI already renders a unit whose usage is unknown -- so a
+    * missing add-on must not be able to fail an operation that merely reports them.
+    * Letting it propagate meant creating a computing unit failed after the pod had
+    * already been created, which left the pod behind when the transaction rolled back.
+    *
+    * Status is resolved from pod phases through a different call, so an unreachable
+    * cluster is still visible rather than being hidden by this fallback.
+    */
   private def fetchPodMetricsItems(): Iterable[PodMetrics] =
-    client.top().pods().metrics(namespace).getItems.asScala
+    try client.top().pods().metrics(namespace).getItems.asScala
+    catch {
+      case e: Throwable =>
+        logger.warn(
+          s"Could not read pod metrics from namespace $namespace; reporting none. " +
+            s"Is metrics-server installed? (${e.getClass.getSimpleName}: ${e.getMessage})"
+        )
+        Iterable.empty
+    }
 
   /**
     * CPU/memory of every pod in the namespace, keyed by pod name, in one call — the bulk
