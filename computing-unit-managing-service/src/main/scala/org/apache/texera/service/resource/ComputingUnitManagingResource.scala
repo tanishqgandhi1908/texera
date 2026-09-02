@@ -232,6 +232,50 @@ object ComputingUnitManagingResource {
     s"${uri.getScheme}://${uri.getAuthority}"
   }
 
+  /**
+    * The readable half of a vfs2 FileNotFoundException.
+    *
+    * FileResolver builds these with the explanation as the constructor argument, but vfs2
+    * treats that argument as a *file name* and formats it into its own template -- giving
+    * `Could not read from "Model file X not found." because it is not a file.` That was
+    * harmless while the exception only ever reached a log; now that it is answered to the
+    * caller, the argument is taken back out of getInfo and the template dropped.
+    */
+  private[resource] def notFoundReason(
+      notFound: org.apache.commons.vfs2.FileNotFoundException,
+      modelPath: String
+  ): String =
+    Option(notFound.getInfo)
+      .flatMap(_.headOption)
+      .map(_.trim)
+      .filter(_.nonEmpty)
+      .getOrElse(s"Could not resolve the model version $modelPath.")
+
+  /**
+    * The FileNotFoundException somewhere in a throwable's cause chain, if there is one.
+    *
+    * The walk is depth-bounded rather than guarded only against direct self-reference:
+    * initCause allows two throwables to name each other, and a cycle of any length would
+    * otherwise spin here forever. Real chains are a few links long, so a low bound costs
+    * nothing.
+    */
+  @scala.annotation.tailrec
+  private[resource] def fileNotFoundIn(
+      error: Throwable,
+      remainingDepth: Int = MaxCauseDepth
+  ): Option[org.apache.commons.vfs2.FileNotFoundException] =
+    error match {
+      case notFound: org.apache.commons.vfs2.FileNotFoundException => Some(notFound)
+      case _ if remainingDepth <= 0                                => None
+      case _ =>
+        Option(error.getCause).filter(_ ne error) match {
+          case Some(cause) => fileNotFoundIn(cause, remainingDepth - 1)
+          case None        => None
+        }
+    }
+
+  private val MaxCauseDepth = 16
+
   private val JvmHeapSize = "^([0-9]+)([kKmMgG]?)$".r
 
   /**
@@ -925,11 +969,21 @@ class ComputingUnitManagingResource extends LazyLogging {
     // path" as FileNotFoundException, which dropwizard would turn into a bare 500 saying
     // only that the request was logged. Both are the caller's mistake and both messages
     // already say which, so they are worth passing on.
+    //
+    // Looked for in the cause chain rather than caught directly: the lookup runs inside a
+    // jOOQ transaction, and jOOQ wraps a checked exception thrown in one as
+    // DataAccessException("Rollback caused"). Catching FileNotFoundException alone
+    // therefore worked for a malformed path (rejected before the transaction opens) and
+    // silently missed the far commoner "no such model version".
     val resolved =
       try FileResolver.resolveModelVersion(trimmed)
       catch {
-        case e: org.apache.commons.vfs2.FileNotFoundException =>
-          throw new BadRequestException(Option(e.getMessage).getOrElse(s"Unknown model $trimmed."))
+        case e: Throwable =>
+          fileNotFoundIn(e) match {
+            case Some(notFound) =>
+              throw new BadRequestException(notFoundReason(notFound, trimmed))
+            case None => throw e
+          }
       }
     (trimmed, resolved)
   }

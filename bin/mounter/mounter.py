@@ -112,10 +112,21 @@ def _responds(path):
 
 
 def _remove_empty_dirs(path, cuid):
-    """Remove `path` and any parents left empty, stopping at the CU's own directory."""
-    stop_at = os.path.normpath(os.path.join(MOUNT_ROOT, cuid))
+    """Remove `path` and any parents left empty, strictly below the CU's own directory.
+
+    The CU directory itself must survive. It is the source of the computing-unit pod's
+    hostPath bind mount, so the pod is attached to that exact inode for its whole life:
+    remove the directory and the pod keeps the old, now-unlinked one. Everything mounted
+    there afterwards lands on a new inode the pod cannot see, so a single failed mount
+    would silently disable mounting for that unit until it was recreated.
+
+    Membership is tested on path components rather than as a string prefix, because
+    "/…/mounts/31" starts with "/…/mounts/3" -- cleaning up cu 3 would otherwise walk
+    into cu 31's directory.
+    """
+    cu_dir = os.path.normpath(os.path.join(MOUNT_ROOT, cuid))
     path = os.path.normpath(path)
-    while path.startswith(stop_at):
+    while path != cu_dir and os.path.commonpath([cu_dir, path]) == cu_dir:
         try:
             os.rmdir(path)
         except OSError:

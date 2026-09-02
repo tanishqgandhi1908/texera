@@ -256,6 +256,51 @@ class ComputingUnitManagingResourceSpec
     ).foreach(name => thrown.getMessage should include(name))
   }
 
+  // The model lookup runs inside a jOOQ transaction, and jOOQ wraps a checked exception
+  // thrown in one as DataAccessException("Rollback caused"). Catching FileNotFoundException
+  // directly therefore worked for a malformed path -- rejected before the transaction opens
+  // -- and silently missed the far commoner "no such model version", which stayed a bare
+  // 500 that named nothing.
+  "fileNotFoundIn" should "find the reason through jOOQ's rollback wrapper" in {
+    val notFound = new org.apache.commons.vfs2.FileNotFoundException("Model file X not found.")
+    val wrapped = new org.jooq.exception.DataAccessException("Rollback caused", notFound)
+
+    ComputingUnitManagingResource.fileNotFoundIn(wrapped) shouldBe Some(notFound)
+    ComputingUnitManagingResource.fileNotFoundIn(notFound) shouldBe Some(notFound)
+    // Nested more than one level deep, as a rollback inside a rollback would be.
+    ComputingUnitManagingResource.fileNotFoundIn(
+      new RuntimeException("outer", wrapped)
+    ) shouldBe Some(notFound)
+  }
+
+  it should "not claim a reason that is not there" in {
+    ComputingUnitManagingResource.fileNotFoundIn(new RuntimeException("unrelated")) shouldBe None
+    ComputingUnitManagingResource.fileNotFoundIn(
+      new RuntimeException("outer", new IllegalStateException("inner"))
+    ) shouldBe None
+  }
+
+  // initCause lets two throwables name each other, so guarding only against direct
+  // self-reference would leave the walk spinning on a two-link cycle.
+  it should "terminate on a cause cycle" in {
+    val first = new RuntimeException("first")
+    val second = new RuntimeException("second", first)
+    first.initCause(second)
+
+    ComputingUnitManagingResource.fileNotFoundIn(first) shouldBe None
+  }
+
+  // vfs2 treats its constructor argument as a file name and formats it into its own
+  // template, so getMessage reads `Could not read from "Model file X not found." because
+  // it is not a file.` -- fine in a log, not something to answer a caller with.
+  "notFoundReason" should "report the resolver's explanation without vfs2's template" in {
+    val notFound = new org.apache.commons.vfs2.FileNotFoundException("Model file X not found.")
+
+    notFound.getMessage should include("because it is not a file")
+    ComputingUnitManagingResource.notFoundReason(notFound, "/model/a/b/c") shouldBe
+      "Model file X not found."
+  }
+
   "getComputingUnitInfo" should "return the owner's local unit with WRITE access and Running status" in {
     val info = resource.getComputingUnitInfo(800, user)
 

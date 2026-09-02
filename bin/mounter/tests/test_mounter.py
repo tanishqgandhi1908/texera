@@ -121,6 +121,44 @@ def test_the_pod_name_prefix_is_configurable(mounter, monkeypatch):
 
 # ─────────────────── do_mount() ───────────────────
 
+# The CU directory is the source of the computing-unit pod's hostPath bind mount, so the
+# pod is attached to that exact inode for its whole life. Removing it leaves the pod on the
+# old, unlinked inode, and everything mounted afterwards lands on a new one the pod cannot
+# see -- so a single failed mount used to disable mounting for that unit permanently.
+def test_cleanup_keeps_the_cu_directory_itself(mounter, cu_dir):
+    cu, target = cu_dir("3")
+
+    mounter._remove_empty_dirs(target, "3")
+
+    assert not os.path.exists(target), "the empty commit directory should go"
+    assert not os.path.exists(os.path.dirname(target)), "the empty repo directory should go"
+    assert os.path.isdir(cu), "the CU directory must survive"
+
+
+def test_cleanup_stops_at_a_cu_directory_that_is_a_string_prefix_of_another(mounter, cu_dir):
+    # "/…/mounts/31" starts with "/…/mounts/3": a prefix test would let cleanup for cu 3
+    # walk into cu 31's directory and delete it.
+    cu3, _ = cu_dir("3")
+    cu31, target31 = cu_dir("31")
+
+    mounter._remove_empty_dirs(target31, "31")
+
+    assert os.path.isdir(cu31)
+    assert os.path.isdir(cu3)
+
+
+def test_cleanup_leaves_a_directory_another_commit_still_uses(mounter, cu_dir):
+    cu, target = cu_dir("3", commit="aaa")
+    _, sibling = cu_dir("3", commit="bbb")
+
+    mounter._remove_empty_dirs(target, "3")
+
+    assert not os.path.exists(target)
+    # The repo directory still holds the other commit, so it stays -- and so does the CU's.
+    assert os.path.isdir(os.path.dirname(sibling))
+    assert os.path.isdir(cu)
+
+
 @pytest.mark.parametrize("missing", ["cuid", "repo", "commit", "jwt", "base"])
 def test_do_mount_rejects_incomplete_requests(mounter, missing):
     args = {"cuid": "7", "repo": "model-1", "commit": "abc", "jwt": "t", "base": "http://fs"}
@@ -174,13 +212,21 @@ def test_do_mount_reports_what_geesefs_printed_when_it_fails(mounter):
 
 
 def test_a_rejected_mount_leaves_no_empty_directory_behind(mounter):
-    """A mount the proxy refuses is routine; it should not litter until the next resync."""
+    """A mount the proxy refuses is routine; it should not litter until the next resync.
+
+    It must also not take the CU's own directory with it. That directory is the source of
+    the computing-unit pod's hostPath bind mount, so the pod is attached to that inode for
+    its whole life -- this assertion used to require its removal, which is precisely what
+    left a unit unable to see any later mount.
+    """
     mounter.geesefs_returncode = 1
 
     with pytest.raises(RuntimeError):
         mounter.do_mount("7", "model-1", "abc", "jwt", "http://fs")
 
-    assert not os.path.exists(os.path.join(mounter.MOUNT_ROOT, "7"))
+    cu_dir = os.path.join(mounter.MOUNT_ROOT, "7")
+    assert not os.path.exists(os.path.join(cu_dir, "model-1")), "the repo directory should go"
+    assert os.path.isdir(cu_dir), "the CU directory must survive a rejected mount"
 
 
 def test_a_rejected_mount_keeps_a_sibling_commit_that_is_mounted(mounter, cu_dir):
