@@ -348,6 +348,31 @@ class KubernetesClientSpec extends AnyFlatSpec with Matchers {
     Option(container.getSecurityContext).flatMap(c => Option(c.getPrivileged)) shouldBe None
   }
 
+  // A computing unit runs user code, and with a curated image the image itself was
+  // supplied rather than reviewed, so the container must not be able to run as root or
+  // regain privilege. runAsUser is stated as well as runAsNonRoot because kubelet cannot
+  // verify an image whose USER is a name -- which the Texera image's `USER texera` is, so
+  // runAsNonRoot on its own would stop the stock image from starting at all.
+  it should "pin the container to a non-root user with no way to regain privilege" in {
+    val name = KubernetesClient.generatePodName(11)
+    val (client, _) = clientWithNamedPod(name, null)
+    val namespaceable = mock(classOf[NamespaceableResource[Pod]])
+    val resource = mock(classOf[Resource[Pod]])
+    val captor = ArgumentCaptor.forClass(classOf[Pod])
+    when(client.resource(any(classOf[Pod]))).thenReturn(namespaceable)
+    when(namespaceable.inNamespace(namespace)).thenReturn(resource)
+    when(resource.create()).thenReturn(null)
+
+    new KubernetesClient(client).createPod(11, "1", "2Gi", "0", Map.empty)
+
+    verify(client).resource(captor.capture())
+    val security = captor.getValue.getSpec.getContainers.asScala.head.getSecurityContext
+    security.getRunAsNonRoot shouldBe true
+    security.getRunAsUser shouldBe KubernetesConfig.computingUnitRunAsUser
+    security.getAllowPrivilegeEscalation shouldBe false
+    security.getCapabilities.getDrop.asScala should contain("ALL")
+  }
+
   "mountHostPath" should "scope a unit's mounts to its own cuid" in {
     KubernetesClient.mountHostPath(7) should endWith("/7")
     KubernetesClient.mountHostPath(7) should not be KubernetesClient.mountHostPath(8)

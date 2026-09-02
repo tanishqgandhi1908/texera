@@ -243,6 +243,23 @@ class KubernetesClient(client: io.fabric8.kubernetes.client.KubernetesClient) ex
       .withEnv(envList)
       .withResources(resourceBuilder.build())
 
+    // A computing unit runs user code, and with a curated image nobody reviewed the image
+    // either, so the container is pinned to a non-root user and given no way to regain
+    // privilege. The FUSE mount that would otherwise need it is done by the mounter
+    // instead (see below), so nothing here requires root.
+    if (KubernetesConfig.computingUnitRunAsNonRoot) {
+      containerBuilder
+        .withNewSecurityContext()
+        .withRunAsNonRoot(true)
+        // Stated explicitly because kubelet cannot verify an image whose USER is a name.
+        .withRunAsUser(KubernetesConfig.computingUnitRunAsUser)
+        .withAllowPrivilegeEscalation(false)
+        .withNewCapabilities()
+        .withDrop("ALL")
+        .endCapabilities()
+        .endSecurityContext()
+    }
+
     // The FUSE mount is performed by the per-node texera-mounter (privileged), not here,
     // so this pod stays UNPRIVILEGED. It only *receives* the mount via HostToContainer
     // propagation from a host directory scoped to this CU id (see the hostPath volume below).

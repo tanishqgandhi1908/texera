@@ -80,6 +80,12 @@ object KubernetesConfig {
   val jupyterPublicUrlTemplate: String =
     conf.getString("kubernetes.jupyter-public-url-template")
 
+  // Security context for the computing-unit container. See kubernetes.conf on why the uid
+  // has to be given alongside runAsNonRoot.
+  val computingUnitRunAsNonRoot: Boolean =
+    conf.getBoolean("kubernetes.computing-unit-run-as-non-root")
+  val computingUnitRunAsUser: Long = conf.getLong("kubernetes.computing-unit-run-as-user")
+
   // Per-node mounter that performs the FUSE mount outside the (unprivileged) CU pod.
   val mounterPort: Int = conf.getInt("kubernetes.mounter-port")
   val mounterHostRoot: String = conf.getString("kubernetes.mounter-host-root")
