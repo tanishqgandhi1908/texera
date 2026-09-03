@@ -59,9 +59,21 @@ object ImageMirrorClient extends LazyLogging {
     s"""set -eu
        |
        |echo "Inspecting $sourceRef"
-       |START_CMD=$$(skopeo inspect --config \\
+       |if ! START_CMD=$$(skopeo inspect --config \\
        |  --format '{{.Config.Cmd}} {{.Config.Entrypoint}}' \\
-       |  "docker://$sourceRef")
+       |  "docker://$sourceRef" 2>&1); then
+       |  echo ""
+       |  echo "ERROR: could not read $sourceRef from its registry."
+       |  echo "$$START_CMD"
+       |  echo ""
+       |  echo "If that says the manifest is unknown, the tag does not exist. A Docker Hub"
+       |  echo "page address carries no tag, so ':latest' was assumed -- and many images do"
+       |  echo "not publish one. Register the reference with the tag you want, for example"
+       |  echo "'owner/name:1.0'."
+       |  echo "If it mentions authorisation, the image is private; only public images can"
+       |  echo "be mirrored."
+       |  exit 1
+       |fi
        |echo "Start command: $$START_CMD"
        |
        |if ! echo "$$START_CMD" | grep -q '${CuratedImageConfig.requiredCommand}'; then
