@@ -373,6 +373,54 @@ class KubernetesClientSpec extends AnyFlatSpec with Matchers {
     security.getCapabilities.getDrop.asScala should contain("ALL")
   }
 
+  // A GPU unit is the whole point of curating an image for something like AlphaFold, so
+  // the request has to carry the vendor resource -- and must NOT name a RuntimeClass the
+  // cluster may not have. Kubernetes rejects a pod naming an undefined RuntimeClass
+  // outright, so hardcoding one made every GPU unit fail at creation on a cluster that
+  // exposes GPUs through the device plugin alone.
+  it should "request the vendor GPU resource when a GPU is asked for" in {
+    val name = KubernetesClient.generatePodName(21)
+    val (client, _) = clientWithNamedPod(name, null)
+    val namespaceable = mock(classOf[NamespaceableResource[Pod]])
+    val resource = mock(classOf[Resource[Pod]])
+    val captor = ArgumentCaptor.forClass(classOf[Pod])
+    when(client.resource(any(classOf[Pod]))).thenReturn(namespaceable)
+    when(namespaceable.inNamespace(namespace)).thenReturn(resource)
+    when(resource.create()).thenReturn(null)
+
+    new KubernetesClient(client).createPod(21, "2", "2Gi", "1", Map.empty)
+
+    verify(client).resource(captor.capture())
+    val built = captor.getValue
+    val limits = built.getSpec.getContainers.asScala.head.getResources.getLimits.asScala
+    limits.keys should contain(KubernetesConfig.gpuResourceKey)
+    limits(KubernetesConfig.gpuResourceKey).toString shouldBe "1"
+
+    // Whatever the deployment configured -- and nothing at all when it configured nothing.
+    val expected = KubernetesConfig.computingUnitGpuRuntimeClass
+    if (expected.isEmpty) Option(built.getSpec.getRuntimeClassName) shouldBe None
+    else built.getSpec.getRuntimeClassName shouldBe expected
+  }
+
+  it should "name no RuntimeClass and no GPU resource when none is asked for" in {
+    val name = KubernetesClient.generatePodName(22)
+    val (client, _) = clientWithNamedPod(name, null)
+    val namespaceable = mock(classOf[NamespaceableResource[Pod]])
+    val resource = mock(classOf[Resource[Pod]])
+    val captor = ArgumentCaptor.forClass(classOf[Pod])
+    when(client.resource(any(classOf[Pod]))).thenReturn(namespaceable)
+    when(namespaceable.inNamespace(namespace)).thenReturn(resource)
+    when(resource.create()).thenReturn(null)
+
+    new KubernetesClient(client).createPod(22, "2", "2Gi", "0", Map.empty)
+
+    verify(client).resource(captor.capture())
+    val built = captor.getValue
+    built.getSpec.getContainers.asScala.head.getResources.getLimits.asScala.keys should
+      not contain KubernetesConfig.gpuResourceKey
+    Option(built.getSpec.getRuntimeClassName) shouldBe None
+  }
+
   "mountHostPath" should "scope a unit's mounts to its own cuid" in {
     KubernetesClient.mountHostPath(7) should endWith("/7")
     KubernetesClient.mountHostPath(7) should not be KubernetesClient.mountHostPath(8)

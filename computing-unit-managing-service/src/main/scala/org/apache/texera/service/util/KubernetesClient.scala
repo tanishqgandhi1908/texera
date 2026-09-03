@@ -227,9 +227,12 @@ class KubernetesClient(client: io.fabric8.kubernetes.client.KubernetesClient) ex
       .endMetadata()
       .withNewSpec()
 
-    // Only add runtimeClassName when using NVIDIA GPU
-    if (gpuLimit != "0" && KubernetesConfig.gpuResourceKey.contains("nvidia")) {
-      specBuilder.withRuntimeClassName("nvidia")
+    // A GPU unit runs under the configured RuntimeClass, unless there is none to name.
+    // Kubernetes rejects a pod naming a class the cluster has not defined, and a cluster
+    // exposing GPUs through the device plugin alone defines none -- so this has to be
+    // possible to turn off, or GPU units cannot be created there at all.
+    if (gpuLimit != "0" && KubernetesConfig.computingUnitGpuRuntimeClass.nonEmpty) {
+      specBuilder.withRuntimeClassName(KubernetesConfig.computingUnitGpuRuntimeClass)
     }
 
     val containerBuilder = specBuilder

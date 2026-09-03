@@ -63,6 +63,16 @@ object KubernetesConfig {
       .filter(_.nonEmpty)
       .toList
 
+  /**
+    * RuntimeClass for a GPU computing unit, or empty to name none.
+    *
+    * Kubernetes rejects a pod that names a RuntimeClass the cluster has not defined, so
+    * this cannot be assumed: a cluster exposing GPUs through the NVIDIA device plugin
+    * alone has no such class, and every GPU unit there fails at creation.
+    */
+  val computingUnitGpuRuntimeClass: String =
+    conf.getString("kubernetes.computing-unit-gpu-runtime-class").trim
+
   // GPU resource key used directly in Kubernetes resource specifications
   val gpuResourceKey: String = conf.getString("kubernetes.computing-unit-gpu-resource-key")
 
