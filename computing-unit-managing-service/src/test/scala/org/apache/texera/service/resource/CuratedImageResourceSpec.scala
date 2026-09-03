@@ -74,6 +74,33 @@ class CuratedImageResourceSpec extends AnyFlatSpec with Matchers {
     normaliseRef("hub.docker.com/r/texera/cu-alphafold3") shouldBe "texera/cu-alphafold3:latest"
   }
 
+  // The address bar shows this while an owner manages their own image, so it is the one
+  // an administrator curating their own build is most likely to paste.
+  it should "turn an owner's own repository page address into a pull reference" in {
+    normaliseRef("https://hub.docker.com/repository/docker/tagandhi19/texera-cu-sklearn") shouldBe
+      "tagandhi19/texera-cu-sklearn:latest"
+  }
+
+  // /general, /tags and /settings are parts of the web page, not of the reference.
+  it should "drop the page's tab segment" in {
+    normaliseRef(
+      "https://hub.docker.com/repository/docker/tagandhi19/texera-cu-sklearn/general"
+    ) shouldBe
+      "tagandhi19/texera-cu-sklearn:latest"
+    normaliseRef(
+      "https://hub.docker.com/repository/docker/tagandhi19/texera-cu-sklearn/tags"
+    ) shouldBe
+      "tagandhi19/texera-cu-sklearn:latest"
+    normaliseRef("https://hub.docker.com/r/tagandhi19/texera-cu-sklearn/tags") shouldBe
+      "tagandhi19/texera-cu-sklearn:latest"
+  }
+
+  it should "leave a Docker Hub address it does not recognise alone, for validate to reject" in {
+    // Better an immediate rejection than a mirror job that spends minutes discovering
+    // hub.docker.com is not a registry and prints the 404 page it got back.
+    normaliseRef("https://hub.docker.com/u/tagandhi19") should startWith("hub.docker.com/")
+  }
+
   it should "tolerate a trailing slash, which a copied address usually has" in {
     normaliseRef("https://hub.docker.com/r/texera/cu-alphafold3/") shouldBe
       "texera/cu-alphafold3:latest"
@@ -96,6 +123,30 @@ class CuratedImageResourceSpec extends AnyFlatSpec with Matchers {
     normaliseRef("myregistry.io:5000/team/img") shouldBe "myregistry.io:5000/team/img:latest"
     normaliseRef("10.96.0.99:5000/texera/computing-unit-master:dev") shouldBe
       "10.96.0.99:5000/texera/computing-unit-master:dev"
+  }
+
+  // Docker Hub is what a bare reference already means, so both forms have to reduce to
+  // the same string. Otherwise one image registered as "owner/name:1" and again as
+  // "docker.io/owner/name:1" is curated twice -- the duplicate check compares references,
+  // so it can only catch what normalisation made equal.
+  it should "reduce an explicit Docker Hub registry to the bare reference" in {
+    normaliseRef("docker.io/tagandhi19/texera-cu-sklearn:1.0") shouldBe
+      "tagandhi19/texera-cu-sklearn:1.0"
+    normaliseRef("index.docker.io/tagandhi19/texera-cu-sklearn:1.0") shouldBe
+      "tagandhi19/texera-cu-sklearn:1.0"
+    normaliseRef("registry-1.docker.io/tagandhi19/texera-cu-sklearn:1.0") shouldBe
+      "tagandhi19/texera-cu-sklearn:1.0"
+  }
+
+  // "library/" is Docker Hub's namespace for official images, whose reference is the name.
+  it should "reduce an official image's fully qualified reference" in {
+    normaliseRef("docker.io/library/ubuntu:22.04") shouldBe "ubuntu:22.04"
+  }
+
+  // A real registry that merely starts with similar text must be left alone.
+  it should "not mistake another registry for Docker Hub" in {
+    normaliseRef("docker.io.evil.example/team/img:1") shouldBe "docker.io.evil.example/team/img:1"
+    normaliseRef("ghcr.io/apache/texera:latest") shouldBe "ghcr.io/apache/texera:latest"
   }
 
   it should "leave a digest-pinned reference untagged" in {

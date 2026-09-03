@@ -104,20 +104,63 @@ object CuratedImageResource extends LazyLogging {
     val trimmed = raw.trim.stripSuffix("/")
     val withoutScheme = trimmed.replaceFirst("^https?://", "")
     val repo =
-      if (withoutScheme.startsWith("hub.docker.com/r/")) {
-        withoutScheme.stripPrefix("hub.docker.com/r/")
-      } else if (withoutScheme.startsWith("hub.docker.com/_/")) {
-        // A Docker official image: its pull reference is the bare name, not the path.
-        withoutScheme.stripPrefix("hub.docker.com/_/")
-      } else {
-        withoutScheme
-      }
+      if (withoutScheme.startsWith(DockerHubHost + "/")) dockerHubRepo(withoutScheme)
+      else stripImplicitDockerHubRegistry(withoutScheme)
 
     // A tag is only absent if the administrator left it off. Defaulting is friendlier than
     // rejecting, and matches what every container tool does with the same input. The check
     // looks after the last slash so a registry's port is not mistaken for a tag.
     val lastSegment = repo.substring(repo.lastIndexOf('/') + 1)
     if (lastSegment.contains(":") || repo.contains("@sha256:")) repo else s"$repo:latest"
+  }
+
+  private val DockerHubHost = "hub.docker.com"
+
+  /**
+    * Docker Hub is the registry a bare reference already means, and it can also be named
+    * explicitly. Both forms have to reduce to the same string, or the same image
+    * registered once as "owner/name:1" and once as "docker.io/owner/name:1" is curated
+    * twice -- two rows, two repositories, two mirror jobs, for one image. The duplicate
+    * check compares references, so it can only catch what normalisation has made equal.
+    *
+    * "library/" is Docker Hub's namespace for official images, whose reference is the
+    * bare name.
+    */
+  private val DockerHubRegistries =
+    Seq("docker.io/", "index.docker.io/", "registry-1.docker.io/")
+
+  private def stripImplicitDockerHubRegistry(reference: String): String =
+    DockerHubRegistries.find(reference.startsWith) match {
+      case None => reference
+      case Some(registry) =>
+        val path = reference.stripPrefix(registry)
+        if (path.startsWith("library/")) path.stripPrefix("library/") else path
+    }
+
+  /**
+    * The pull reference inside a Docker Hub web address.
+    *
+    * Three shapes turn up in practice, and an administrator curating their *own* image
+    * lands on the third, because that is what the address bar shows while managing it:
+    *
+    *   hub.docker.com/r/<owner>/<name>                    the public page
+    *   hub.docker.com/_/<name>                            an official image
+    *   hub.docker.com/repository/docker/<owner>/<name>    the owner's own page
+    *
+    * Any of them may carry a trailing tab segment -- /general, /tags, /settings -- which
+    * is part of the web page and not of the reference, so only the owner/name portion is
+    * kept. An official image's reference is the bare name rather than a path.
+    *
+    * Returns the address unchanged when the shape is not recognised; validate() rejects
+    * that rather than letting a mirror job spend minutes discovering it.
+    */
+  private def dockerHubRepo(address: String): String = {
+    val path = address.stripPrefix(DockerHubHost + "/")
+    if (path.startsWith("_/")) path.stripPrefix("_/").split("/").head
+    else if (path.startsWith("r/")) path.stripPrefix("r/").split("/").take(2).mkString("/")
+    else if (path.startsWith("repository/docker/"))
+      path.stripPrefix("repository/docker/").split("/").take(2).mkString("/")
+    else address
   }
 
   private def toCuratedImage(record: Record): CuratedImage =
@@ -212,12 +255,13 @@ object CuratedImageResource extends LazyLogging {
 
         case MirrorState.Succeeded =>
           val text = log.getOrElse("")
+          val digest = ImageMirrorClient.sourceDigestFrom(text)
           finishMirror(
             iid,
             Status.Ready,
             Some(CuratedImageConfig.imageTagFor(iid, mirrorNumber)),
-            ImageMirrorClient.sourceDigestFrom(text),
-            text
+            digest,
+            text + digest.flatMap(sameContentNote(iid, _)).getOrElse("")
           )
 
         case MirrorState.Failed =>
@@ -242,6 +286,35 @@ object CuratedImageResource extends LazyLogging {
   }
 
   private val AbsentGracePeriodMillis = 60_000L
+
+  /**
+    * A note for the log when another curated image is the very same content.
+    *
+    * Only knowable once the mirror has resolved the digest, which is why this cannot be a
+    * check at registration time: two different references -- a tag and the digest it
+    * points at, or the same repository named with and without its registry -- are equal
+    * only after the fact. The duplicate is not rejected, because by now the copy has
+    * already been made and refusing would lose it; but an administrator looking at two
+    * rows deserves to be told they are one image.
+    */
+  private def sameContentNote(iid: Int, digest: String): Option[String] = {
+    val others = context
+      .select(NAME)
+      .from(CU_IMAGE)
+      .where(SOURCE_DIGEST.eq(digest))
+      .and(IID.ne(iid))
+      .and(STATUS.eq(Status.Ready))
+      .fetch()
+      .asScala
+      .map(_.get(NAME))
+      .toList
+
+    Option.when(others.nonEmpty)(
+      s"\n\nNote: this is the same image as ${others.map("'" + _ + "'").mkString(", ")} " +
+        "-- same digest, reached by a different reference. The registry stores the layers " +
+        "once, so the duplicate costs little space, but only one of these rows is needed."
+    )
+  }
 
   private def updateLogOnly(iid: Int, log: String): Unit =
     context.update(CU_IMAGE).set(MIRROR_LOG, log).where(IID.eq(iid)).execute()
@@ -299,6 +372,17 @@ class CuratedImageResource extends LazyLogging {
     // Either way the mirror would fail with a much less obvious message.
     if (normaliseRef(ref).exists(_.isWhitespace)) {
       throw new BadRequestException("Docker Hub link cannot contain spaces.")
+    }
+    // A hub.docker.com address that survived normalisation is a page shape we do not
+    // recognise, and would be pulled as if hub.docker.com were a registry -- which it is
+    // not. skopeo gets an HTML 404 back and reports it verbatim, so the administrator
+    // waits for a mirror job only to be shown a page of markup. Say so immediately.
+    if (normaliseRef(ref).startsWith(DockerHubHost + "/")) {
+      throw new BadRequestException(
+        s"'$ref' is a Docker Hub page, not an image reference, and its shape is not one " +
+          "this recognises. Use the image's own reference -- for example " +
+          "'tagandhi19/texera-cu-sklearn:1.0' -- or the address of its repository page."
+      )
     }
   }
 
