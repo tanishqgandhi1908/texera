@@ -69,7 +69,12 @@ CREATE TABLE IF NOT EXISTS cu_image
     creation_time  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (created_by) REFERENCES "user" (uid) ON DELETE SET NULL,
-    UNIQUE (name)
+    UNIQUE (name),
+    -- One row per reference, enforced here rather than only checked in the service. The
+    -- check there is a read followed by a write, so two administrators registering the
+    -- same link at the same moment both passed it and created two rows -- two mirror jobs
+    -- pulling the same image. Only the database can arbitrate that.
+    UNIQUE (source_ref)
 );
 
 -- Registering a reference that is already mirrored should reuse the existing copy rather

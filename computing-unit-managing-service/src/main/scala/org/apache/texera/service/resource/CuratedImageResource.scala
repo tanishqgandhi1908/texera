@@ -455,16 +455,29 @@ class CuratedImageResource extends LazyLogging {
       )
     }
 
-    val iid = context
-      .insertInto(CU_IMAGE)
-      .set(NAME, name)
-      .set(SOURCE_REF, sourceRef)
-      .set(STATUS, Status.Pending)
-      .set(CREATED_BY, Integer.valueOf(user.getUid.intValue()))
-      .returning(IID)
-      .fetchOne()
-      .get(IID)
-      .intValue()
+    // The checks above are a read followed by a write, so two administrators registering
+    // the same link at the same moment both pass them. cu_image is unique on name and on
+    // source_ref, so the database refuses the second one -- caught here to answer with the
+    // same explanation the checks give rather than a bare 500.
+    val iid =
+      try {
+        context
+          .insertInto(CU_IMAGE)
+          .set(NAME, name)
+          .set(SOURCE_REF, sourceRef)
+          .set(STATUS, Status.Pending)
+          .set(CREATED_BY, Integer.valueOf(user.getUid.intValue()))
+          .returning(IID)
+          .fetchOne()
+          .get(IID)
+          .intValue()
+      } catch {
+        case _: org.jooq.exception.IntegrityConstraintViolationException =>
+          throw new BadRequestException(
+            s"'$sourceRef' or the name '$name' was registered a moment ago by someone " +
+              "else. Reload the list -- the image is already there."
+          )
+      }
 
     startMirror(iid, sourceRef)
     fetch(iid)

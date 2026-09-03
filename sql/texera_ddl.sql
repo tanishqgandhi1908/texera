@@ -277,7 +277,10 @@ CREATE TABLE IF NOT EXISTS cu_image
     creation_time  TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (created_by) REFERENCES "user" (uid) ON DELETE SET NULL,
-    UNIQUE (name)
+    UNIQUE (name),
+    -- One row per reference; the service's own check is a read-then-write and so cannot
+    -- stop two simultaneous registrations of the same link.
+    UNIQUE (source_ref)
 );
 
 CREATE INDEX IF NOT EXISTS idx_cu_image_source_digest ON cu_image (source_digest);
