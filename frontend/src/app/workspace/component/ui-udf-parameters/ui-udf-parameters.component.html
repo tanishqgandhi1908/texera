@@ -96,9 +96,16 @@
         <div
           class="field-cell"
           *ngFor="let column of fieldColumns">
-          <formly-field
-            *ngIf="getColumnField(rowField, column) as columnField"
-            [field]="columnField"></formly-field>
+          <span
+            class="resource-type-label"
+            *ngIf="isTypeColumn(column) && resourceTypeLabel(parameter) as resourceType; else columnEditor"
+            >{{ resourceType }}</span
+          >
+          <ng-template #columnEditor>
+            <formly-field
+              *ngIf="getColumnField(rowField, column) as columnField"
+              [field]="columnField"></formly-field>
+          </ng-template>
         </div>
       </ng-container>
     </div>

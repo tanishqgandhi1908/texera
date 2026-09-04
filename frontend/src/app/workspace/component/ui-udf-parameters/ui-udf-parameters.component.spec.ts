@@ -89,6 +89,28 @@ describe("UiUdfParametersComponent", () => {
     expect(draftRow.compareDocumentPosition(existingRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("should show the resource kind in the type cell, and the stored type otherwise", () => {
+    // A resource row stores `string` because a path is what the UDF receives. The panel
+    // shows the resource kind instead, since that is what tells the reader what to pick.
+    expect(component.resourceTypeLabel({ inputType: "model" })).toBe("model");
+    expect(component.resourceTypeLabel({ inputType: "dataset" })).toBe("dataset");
+
+    // An ordinary parameter has no inputType and keeps the Formly editor showing its
+    // stored attributeType, so the cell must fall through rather than render a label.
+    expect(component.resourceTypeLabel({})).toBeUndefined();
+    expect(component.resourceTypeLabel(undefined)).toBeUndefined();
+
+    // An unrecognised inputType is not a resource this panel can browse, so it must not
+    // be presented as one -- otherwise a typo in the parser would surface as a type.
+    expect(component.resourceTypeLabel({ inputType: "sasquatch" })).toBeUndefined();
+    expect(component.resourceTypeLabel({ inputType: "" })).toBeUndefined();
+
+    // The label only ever replaces the Type cell; Value and Name keep their editors.
+    expect(component.isTypeColumn(component.fieldColumns[2])).toBe(true);
+    expect(component.isTypeColumn(component.fieldColumns[0])).toBe(false);
+    expect(component.isTypeColumn(component.fieldColumns[1])).toBe(false);
+  });
+
   it("should disable name and type fields while leaving value editable", () => {
     const valueControl = new FormControl({ value: "42", disabled: true });
     const nameControl = new FormControl("threshold");

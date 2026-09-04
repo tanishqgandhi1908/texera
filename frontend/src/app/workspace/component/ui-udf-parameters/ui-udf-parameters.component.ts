@@ -37,6 +37,12 @@ import type { AttributeType } from "../../types/workflow-compiling.interface";
 type UiUdfParameterColumn = Readonly<{ label: string; key: string; parentKey?: string; disabled: boolean }>;
 
 const VALUE_COLUMN: UiUdfParameterColumn = { label: "Value", key: "value", disabled: false };
+const TYPE_COLUMN: UiUdfParameterColumn = {
+  label: "Type",
+  key: "attributeType",
+  parentKey: "attribute",
+  disabled: true,
+};
 
 // A row that names a resource is edited by that resource's browser rather than a text box.
 // A row without one keeps the default text editor, which is what an ordinary typed
@@ -65,7 +71,7 @@ export class UiUdfParametersComponent extends FieldArrayType<FormlyFieldConfig> 
   readonly fieldColumns: UiUdfParameterColumn[] = [
     VALUE_COLUMN,
     { label: "Name", key: "attributeName", parentKey: "attribute", disabled: true },
-    { label: "Type", key: "attributeType", parentKey: "attribute", disabled: true },
+    TYPE_COLUMN,
   ];
 
   readonly addParameterTypeOptions: AttributeType[] = ["string", "integer", "long", "double", "boolean", "timestamp"];
@@ -127,6 +133,26 @@ export class UiUdfParametersComponent extends FieldArrayType<FormlyFieldConfig> 
     valueField.type = RESOURCE_VALUE_EDITOR;
     // Which browser to open is the row's business, not the editor's.
     valueField.props = { ...(valueField.props ?? {}), resource: inputType };
+  }
+
+  /**
+   * What the locked Type cell should read for a resource row, or undefined for an
+   * ordinary one.
+   *
+   * A resource parameter's stored type is `string`, because a path is what the UDF
+   * receives and `AttributeType` describes tuple data rather than where a value came
+   * from. Showing `string` in the panel is accurate and useless: the row's value is
+   * picked from a model or dataset browser, so the type the reader needs to see is the
+   * resource kind. Both cells are derived from the code and locked, so this changes only
+   * what is displayed -- the stored `attributeType` stays `string`.
+   */
+  resourceTypeLabel(parameter: { inputType?: string } | undefined): string | undefined {
+    const inputType = parameter?.inputType;
+    return inputType && RESOURCE_INPUT_TYPES.has(inputType) ? inputType : undefined;
+  }
+
+  isTypeColumn(column: UiUdfParameterColumn): boolean {
+    return column === TYPE_COLUMN;
   }
 
   /** Finds the Formly field config that backs one visible column in a parameter row. */

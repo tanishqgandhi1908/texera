@@ -28,6 +28,15 @@
   min-width: 0;
 }
 
+// A resource row's type is shown as plain text rather than in a locked input: it is not
+// the stored attributeType, and a disabled box invites a click that does nothing.
+.resource-type-label {
+  display: inline-block;
+  height: 32px;
+  line-height: 32px;
+  color: rgba(0, 0, 0, 0.45);
+}
+
 :host ::ng-deep .ant-form-item {
   margin-bottom: 0;
 }
